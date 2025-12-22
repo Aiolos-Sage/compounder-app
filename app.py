@@ -30,17 +30,15 @@ ticker_input = st.text_input(
 # --- HELPER FUNCTIONS ---
 def clean_value(val):
     """
-    Extracts the numeric value if the API returns a dictionary (e.g. {'value': 100}).
-    Otherwise returns the value as is.
+    Extracts the numeric value if the API returns a dictionary.
     """
     if isinstance(val, dict):
-        # Try common keys for values
         return val.get('value', val.get('raw', val.get('amount', 0)))
     return val
 
 def fetch_and_process(endpoint_type, company_key):
     """
-    Fetches data, unpacks 'metricsValues', and cleans nested dictionary values.
+    Fetches data, unpacks 'metricsValues', and sets the Index to 'reportDate'.
     """
     url = f"{BASE_URL}/{endpoint_type}/standardized"
     
@@ -76,7 +74,6 @@ def fetch_and_process(endpoint_type, company_key):
             metrics = row.get('metricsValues', {})
             
             if isinstance(metrics, dict):
-                # Clean every metric value in case it is nested
                 cleaned_metrics = {k: clean_value(v) for k, v in metrics.items()}
                 base_data.update(cleaned_metrics)
             
@@ -84,14 +81,23 @@ def fetch_and_process(endpoint_type, company_key):
             
         df = pd.DataFrame(clean_rows)
         
-        # 3. Handle Dates
-        if 'fiscalDate' in df.columns:
-            df['date'] = pd.to_datetime(df['fiscalDate'])
+        # 3. Handle Dates (The critical fix)
+        # We check reportDate first as seen in your screenshot
+        date_col = None
+        if 'reportDate' in df.columns:
+            date_col = 'reportDate'
+        elif 'fiscalDate' in df.columns:
+            date_col = 'fiscalDate'
         elif 'date' in df.columns:
-             df['date'] = pd.to_datetime(df['date'])
+            date_col = 'date'
         
-        if 'date' in df.columns:
-            df = df.sort_values(by='date', ascending=True).set_index('date')
+        if date_col:
+            df['date_index'] = pd.to_datetime(df[date_col])
+            df = df.sort_values(by='date_index', ascending=True).set_index('date_index')
+        else:
+            # Fallback if no date found (uses Fiscal Year if available)
+            if 'fiscalYear' in df.columns:
+                 df = df.sort_values(by='fiscalYear', ascending=True).set_index('fiscalYear')
             
         return df
 
@@ -115,8 +121,6 @@ if st.button("Run Analysis"):
             else:
                 try:
                     # 2. Extract Columns
-                    # Note: We enforce float conversion to prevent type errors
-                    
                     # Cash Flow
                     ocf_raw = cf_df.get('cash_flow_statement_cash_from_operating_activities')
                     capex_raw = cf_df.get('cash_flow_statement_capital_expenditure')
@@ -129,15 +133,13 @@ if st.button("Run Analysis"):
 
                     # 3. Safe Calculation
                     if ocf_raw is not None and assets_raw is not None:
-                        # Ensure numeric (coerce errors to NaN, then fill 0)
+                        # Normalize to numeric (safely)
                         ocf = pd.to_numeric(ocf_raw, errors='coerce').fillna(0)
                         capex = pd.to_numeric(capex_raw, errors='coerce').fillna(0) if capex_raw is not None else 0
-                        
                         assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
                         curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0) if curr_liab_raw is not None else 0
 
-                        # CALCULATION:
-                        # If CapEx is negative (outflow), abs() makes it positive so we can subtract it (standardizing logic)
+                        # Formula
                         # FCF = OCF - |CapEx|
                         if isinstance(capex, (int, float)):
                             fcf_series = ocf - abs(capex)
@@ -146,7 +148,8 @@ if st.button("Run Analysis"):
 
                         ic_series = assets - curr_liab
                         
-                        # Merge
+                        # Merge DataFrames
+                        # We align them by index (Date) to ensure years match
                         df_calc = pd.DataFrame({
                             'FCF': fcf_series, 
                             'Invested_Capital': ic_series
@@ -154,11 +157,20 @@ if st.button("Run Analysis"):
 
                         if len(df_calc) >= 2:
                             # 4. Metrics
-                            start, end = df_calc.index[0], df_calc.index[-1]
+                            start_idx, end_idx = df_calc.index[0], df_calc.index[-1]
                             
+                            # Safely get Year for display
+                            try:
+                                s_year = start_idx.year
+                                e_year = end_idx.year
+                            except AttributeError:
+                                # Fallback if index is just integer (e.g. 2023)
+                                s_year = start_idx
+                                e_year = end_idx
+
                             A1 = df_calc['FCF'].sum()
-                            B1 = df_calc.loc[end, 'FCF'] - df_calc.loc[start, 'FCF']
-                            A2 = df_calc.loc[end, 'Invested_Capital'] - df_calc.loc[start, 'Invested_Capital']
+                            B1 = df_calc.loc[end_idx, 'FCF'] - df_calc.loc[start_idx, 'FCF']
+                            A2 = df_calc.loc[end_idx, 'Invested_Capital'] - df_calc.loc[start_idx, 'Invested_Capital']
                             
                             roiic = B1 / A2 if A2 != 0 else 0
                             reinvest = A2 / A1 if A1 != 0 else 0
@@ -167,7 +179,7 @@ if st.button("Run Analysis"):
                             # --- OUTPUT ---
                             st.divider()
                             st.subheader(f"Analysis: {ticker_input}")
-                            st.caption(f"Period: {start.year} - {end.year}")
+                            st.caption(f"Period: {s_year} - {e_year}")
                             
                             col1, col2, col3 = st.columns(3)
                             col1.metric("Compounder Score", f"{score:.1%}")
@@ -183,6 +195,6 @@ if st.button("Run Analysis"):
                         else:
                             st.warning("Not enough historical data points.")
                     else:
-                        st.error("Could not find required columns.")
+                        st.error("Could not find required columns (OCF or Total Assets).")
                 except Exception as e:
                     st.error(f"Calculation Error: {e}")
