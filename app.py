@@ -3,11 +3,127 @@ import requests
 import pandas as pd
 import numpy as np
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Compounder Formula", page_icon="📈", layout="wide")
+# --- 1. PAGE CONFIG & GOOGLE MATERIAL CSS ---
+st.set_page_config(page_title="Compounder Formula", page_icon="📊", layout="wide")
 
-st.title("📈 Compounder Dashboard")
-st.markdown("Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.")
+# Custom CSS for Material Design Look
+st.markdown("""
+<style>
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Roboto', sans-serif;
+    }
+
+    /* Primary Container Styling (Card-like look) */
+    .block-container {
+        padding-top: 3rem;
+        padding-bottom: 3rem;
+        max-width: 1200px;
+    }
+
+    /* Header Styling */
+    h1 {
+        font-weight: 700;
+        color: #202124; /* Google Black */
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .subtitle {
+        color: #5f6368; /* Google Gray */
+        font-size: 1.1rem;
+        margin-bottom: 2rem;
+    }
+
+    /* Material Cards for Metrics */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+    }
+    div[data-testid="stMetric"]:hover {
+        box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+    }
+    label[data-testid="stMetricLabel"] {
+        font-size: 0.9rem;
+        color: #5f6368;
+        font-weight: 500;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1a73e8; /* Google Blue */
+    }
+
+    /* Custom Button Styling (Material Pill) */
+    .stButton > button {
+        background-color: #1a73e8;
+        color: white;
+        border-radius: 24px;
+        padding: 0.5rem 2rem;
+        font-weight: 500;
+        border: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        transition: background-color 0.2s, box-shadow 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .stButton > button:hover {
+        background-color: #174ea6;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+
+    /* Report Card Styling */
+    .report-card {
+        background-color: #ffffff;
+        border-radius: 16px;
+        padding: 25px;
+        margin-top: 20px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+    }
+    
+    /* Table Styling inside Markdown */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Roboto', sans-serif;
+    }
+    th {
+        text-align: left;
+        color: #5f6368;
+        font-weight: 500;
+        border-bottom: 2px solid #e0e0e0;
+        padding: 10px;
+    }
+    td {
+        padding: 12px 10px;
+        border-bottom: 1px solid #f1f3f4;
+        color: #202124;
+    }
+    tr:last-child td {
+        border-bottom: none;
+        font-weight: bold;
+        background-color: #f8f9fa;
+    }
+
+    /* Dark Mode Overrides (Optional compatibility) */
+    @media (prefers-color-scheme: dark) {
+        h1, .subtitle, td { color: #e8eaed !important; }
+        .report-card, div[data-testid="stMetric"] { background-color: #303134 !important; border-color: #5f6368 !important; }
+        label[data-testid="stMetricLabel"] { color: #9aa0a6 !important; }
+        div[data-testid="stMetricValue"] { color: #8ab4f8 !important; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- HEADER ---
+st.markdown("<h1>Compounder Dashboard</h1>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Analyze capital allocation efficiency using the Compounder Formula.</div>", unsafe_allow_html=True)
 
 # --- SECURE CONFIGURATION ---
 try:
@@ -19,7 +135,7 @@ except (FileNotFoundError, KeyError):
 BASE_URL = "https://api.fiscal.ai/v1/company/financials"
 LIST_URL = "https://api.fiscal.ai/v2/companies-list"
 
-# --- SMART EXCHANGE MAPPING ---
+# --- LOGIC & HELPERS ---
 def normalize_exchange(exchange_name):
     if not exchange_name: return "UNKNOWN"
     name = str(exchange_name).upper()
@@ -31,7 +147,6 @@ def normalize_exchange(exchange_name):
     if "OTC" in name: return "OTC"
     return name.split(' ')[0]
 
-# --- CACHED DATA LOADING ---
 @st.cache_data(ttl=3600)
 def get_company_map():
     headers = {"X-API-KEY": API_KEY}
@@ -55,14 +170,12 @@ def get_company_map():
     except Exception:
         return {}
 
-# --- HELPER FUNCTIONS ---
 def clean_value(val):
     if isinstance(val, dict):
         return val.get('value', val.get('raw', val.get('amount', 0)))
     return val
 
 def format_currency(val):
-    """Auto-formats to Billions (B) or Millions (M)"""
     if val is None: return "N/A"
     abs_val = abs(val)
     if abs_val >= 1e9:
@@ -74,16 +187,14 @@ def format_currency(val):
 
 def fetch_data(endpoint_type, company_key, period="annual", limit=30):
     url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/6.0"}
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/7.0"}
     params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
-    
     try:
         response = requests.get(url, headers=headers, params=params)
         if response.status_code != 200: return pd.DataFrame()
         data = response.json()
         rows = data.get('data', data) if isinstance(data, dict) else data
         if not rows: return pd.DataFrame()
-            
         clean_rows = []
         for row in rows:
             base_data = {k: v for k, v in row.items() if k != 'metricsValues'}
@@ -92,80 +203,75 @@ def fetch_data(endpoint_type, company_key, period="annual", limit=30):
                 cleaned_metrics = {k: clean_value(v) for k, v in metrics.items()}
                 base_data.update(cleaned_metrics)
             clean_rows.append(base_data)
-            
         df = pd.DataFrame(clean_rows)
         date_col = None
         if 'reportDate' in df.columns: date_col = 'reportDate'
         elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
         elif 'date' in df.columns: date_col = 'date'
-        
         if date_col:
             df['date_index'] = pd.to_datetime(df[date_col])
             df = df.sort_values(by='date_index', ascending=True).set_index('date_index')
-            
         return df
     except Exception:
         return pd.DataFrame()
 
-# --- MAIN LAYOUT ---
-with st.spinner("Syncing company database..."):
-    company_map = get_company_map()
+# --- INPUT SECTION (Styled Container) ---
+with st.container():
+    with st.spinner("Connecting to database..."):
+        company_map = get_company_map()
 
-st.write("") 
-col_search, col_time = st.columns([3, 1])
+    col_search, col_time = st.columns([2, 1])
+    
+    with col_search:
+        if company_map:
+            selected_label = st.selectbox(
+                "Select Company", 
+                options=list(company_map.keys()),
+                index=None,
+                placeholder="Search by Ticker or Name (e.g. NVDA)...",
+                label_visibility="visible"
+            )
+            target_company_key = company_map[selected_label] if selected_label else None
+        else:
+            st.error("Database Connection Failed.")
+            target_company_key = None
 
-with col_search:
-    if company_map:
-        selected_label = st.selectbox(
-            "🔎 **Search Company** (Type Ticker or Name)", 
-            options=list(company_map.keys()),
-            index=None,
-            placeholder="e.g. NVDA, MSFT, Apple..."
+    with col_time:
+        timeframe_label = st.selectbox(
+            "Timeframe",
+            options=[
+                "5 Years (Inc. YTD/TTM)", "Last 5 Fiscal Years",
+                "10 Years (Inc. YTD/TTM)", "Last 10 Fiscal Years",
+                "20 Years (Inc. YTD/TTM)", "Last 20 Fiscal Years"
+            ],
+            index=2
         )
-        target_company_key = company_map[selected_label] if selected_label else None
-    else:
-        st.error("Could not connect to company database.")
-        target_company_key = None
 
-with col_time:
-    timeframe_label = st.selectbox(
-        "⏱️ **Select Timeframe**",
-        options=[
-            "5 Years (Inc. YTD/TTM)",
-            "Last 5 Fiscal Years",
-            "10 Years (Inc. YTD/TTM)",
-            "Last 10 Fiscal Years",
-            "20 Years (Inc. YTD/TTM)",
-            "Last 20 Fiscal Years"
-        ],
-        index=2
-    )
+    limit_map = {
+        "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
+        "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
+        "20 Years (Inc. YTD/TTM)": 20, "Last 20 Fiscal Years": 20
+    }
+    selected_limit = limit_map[timeframe_label]
+    include_ttm = "Inc." in timeframe_label
 
-limit_map = {
-    "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
-    "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
-    "20 Years (Inc. YTD/TTM)": 20, "Last 20 Fiscal Years": 20
-}
-selected_limit = limit_map[timeframe_label]
-include_ttm = "Inc." in timeframe_label
+st.write("") # Whitespace
 
-st.divider()
-
+# --- ANALYSIS EXECUTION ---
 if target_company_key:
-    # Title showing selected company
     company_name = selected_label.split('(')[0] if selected_label else target_company_key
     
-    with st.spinner("Fetching Annual & Quarterly reports..."):
+    with st.spinner(f"Analyzing {company_name}..."):
         cf_annual = fetch_data("cash-flow-statement", target_company_key, "annual")
         bs_annual = fetch_data("balance-sheet", target_company_key, "annual")
         cf_q = fetch_data("cash-flow-statement", target_company_key, "quarterly", limit=8)
         bs_q = fetch_data("balance-sheet", target_company_key, "quarterly", limit=4)
 
         if cf_annual.empty or bs_annual.empty:
-            st.error(f"No annual data found for {target_company_key}.")
+            st.warning(f"No annual data found for {company_name}.")
         else:
             try:
-                # --- PROCESS ANNUAL DATA ---
+                # --- DATA PROCESSING ---
                 def extract_series(cf, bs):
                     ocf_raw = cf.get('cash_flow_statement_cash_from_operating_activities')
                     capex_raw = cf.get('cash_flow_statement_capital_expenditure')
@@ -186,30 +292,28 @@ if target_company_key:
 
                 df_calc = extract_series(cf_annual, bs_annual)
                 
-                # --- PROCESS TTM ---
+                # --- TTM LOGIC ---
                 if include_ttm and not cf_q.empty and not bs_q.empty:
-                    last_annual_date = df_calc.index[-1]
-                    last_quarter_date = cf_q.index[-1]
-                    
-                    if last_quarter_date > last_annual_date:
-                        last_4_q = cf_q.tail(4)
-                        if len(last_4_q) == 4:
-                            ocf_ttm = pd.to_numeric(last_4_q.get('cash_flow_statement_cash_from_operating_activities'), errors='coerce').fillna(0).sum()
-                            capex_col = last_4_q.get('cash_flow_statement_capital_expenditure')
-                            if capex_col is None: capex_col = last_4_q.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
-                            capex_ttm = pd.to_numeric(capex_col, errors='coerce').fillna(0).sum()
+                    last_annual = df_calc.index[-1]
+                    last_q = cf_q.index[-1]
+                    if last_q > last_annual:
+                        last_4 = cf_q.tail(4)
+                        if len(last_4) == 4:
+                            ocf_t = pd.to_numeric(last_4.get('cash_flow_statement_cash_from_operating_activities'), errors='coerce').fillna(0).sum()
+                            cpx_col = last_4.get('cash_flow_statement_capital_expenditure')
+                            if cpx_col is None: cpx_col = last_4.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
+                            cpx_t = pd.to_numeric(cpx_col, errors='coerce').fillna(0).sum()
+                            fcf_t = ocf_t - abs(cpx_t)
                             
-                            fcf_ttm = ocf_ttm - abs(capex_ttm)
+                            lbs = bs_q.iloc[-1]
+                            ast_t = float(clean_value(lbs.get('balance_sheet_total_assets', 0)))
+                            liab_t = float(clean_value(lbs.get('balance_sheet_total_current_liabilities', 0)))
+                            ic_t = ast_t - liab_t
                             
-                            latest_bs = bs_q.iloc[-1]
-                            assets_ttm = float(clean_value(latest_bs.get('balance_sheet_total_assets', 0)))
-                            liab_ttm = float(clean_value(latest_bs.get('balance_sheet_total_current_liabilities', 0)))
-                            ic_ttm = assets_ttm - liab_ttm
-                            
-                            ttm_row = pd.DataFrame({'FCF': [fcf_ttm], 'Invested_Capital': [ic_ttm]}, index=[last_quarter_date])
+                            ttm_row = pd.DataFrame({'FCF': [fcf_t], 'Invested_Capital': [ic_t]}, index=[last_q])
                             df_calc = pd.concat([df_calc, ttm_row])
 
-                # --- SLICE DATA ---
+                # --- SLICING ---
                 if len(df_calc) > selected_limit:
                     df_final = df_calc.tail(selected_limit)
                 else:
@@ -218,20 +322,15 @@ if target_company_key:
                 if len(df_final) >= 2:
                     start_idx, end_idx = df_final.index[0], df_final.index[-1]
                     
-                    # Year Labels
+                    # Labels
                     try: s_yr = str(start_idx.year)
                     except: s_yr = str(start_idx)[:4]
-                    
                     try:
-                        # Determine if end is TTM
-                        if include_ttm and end_idx > cf_annual.index[-1]:
-                            e_yr = "TTM"
-                        else:
-                            e_yr = str(end_idx.year)
-                    except:
-                        e_yr = str(end_idx)[:4]
+                        if include_ttm and end_idx > cf_annual.index[-1]: e_yr = "TTM"
+                        else: e_yr = str(end_idx.year)
+                    except: e_yr = str(end_idx)[:4]
 
-                    # --- CALCULATIONS ---
+                    # Values
                     FCF_start = df_final.loc[start_idx, 'FCF']
                     FCF_end = df_final.loc[end_idx, 'FCF']
                     IC_start = df_final.loc[start_idx, 'Invested_Capital']
@@ -245,105 +344,13 @@ if target_company_key:
                     reinvest = A2 / A1 if A1 != 0 else 0
                     score = roiic * reinvest
                     
-                    st.header(f"{company_name} Compounder Analysis")
-                    st.caption("(Values in Billions USD)")
-
-                    # --- BUILD THE RESULT TABLE ---
-                    # Row 1: A1
-                    row_A1 = {
-                        "Metric": "Accumulated Free Cash Flow",
-                        "Label": "A1",
-                        "Value": format_currency(A1),
-                        "Formula": f"$\\sum FCF_{{{s_yr}-{e_yr}}}$",
-                        "Notes": f"Total FCF generated over the last {len(df_final)} years"
-                    }
+                    # --- RENDER RESULTS ---
                     
-                    # Row 2: B1
-                    row_B1 = {
-                        "Metric": "Increase in Free Cash Flow",
-                        "Label": "B1",
-                        "Value": format_currency(B1),
-                        "Formula": f"$FCF_{{{e_yr}}} - FCF_{{{s_yr}}}$",
-                        "Notes": f"FCF grew from {format_currency(FCF_start)} ({s_yr}) to {format_currency(FCF_end)} ({e_yr})"
-                    }
+                    # 1. Header Card
+                    st.markdown(f"<h3>{company_name} Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
                     
-                    # Row 3: A2
-                    row_A2 = {
-                        "Metric": "Increase in Invested Capital",
-                        "Label": "A2",
-                        "Value": format_currency(A2),
-                        "Formula": f"$IC_{{{e_yr}}} - IC_{{{s_yr}}}$",
-                        "Notes": "Capital invested to achieve this growth"
-                    }
-                    
-                    # Row 4: C1
-                    row_C1 = {
-                        "Metric": "ROIIC",
-                        "Label": "C1",
-                        "Value": f"{roiic:.1%}",
-                        "Formula": "$B1 / A2$",
-                        "Notes": "Return on Incremental Invested Capital"
-                    }
-                    
-                    # Row 5: C2
-                    row_C2 = {
-                        "Metric": "Reinvestment Rate",
-                        "Label": "C2",
-                        "Value": f"{reinvest:.1%}",
-                        "Formula": "$A2 / A1$",
-                        "Notes": "% of total FCF reinvested into the business"
-                    }
-                    
-                    # Row 6: Result
-                    row_Res = {
-                        "Metric": "Compounder Score",
-                        "Label": "Result",
-                        "Value": f"**{score:.1%}**",
-                        "Formula": "$C1 \\times C2$",
-                        "Notes": "Measures overall compounding efficiency"
-                    }
-
-                    results_data = [row_A1, row_B1, row_A2, row_C1, row_C2, row_Res]
-
-                    # --- RENDER TABLE WITH MARKDOWN (For Math) ---
-                    md_table = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
-                    for row in results_data:
-                        md_table += f"| {row['Notes']} | {row['Value']} | {row['Formula']} | **{row['Metric']}** | **{row['Label']}** |\n"
-                    
-                    st.markdown(md_table)
-                    
-                    # --- RAW DATA ---
-                    with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
-                        st.dataframe(df_final.style.format("${:,.0f}"))
-
-                    # --- GUIDE REFERENCE (ADDED BACK) ---
-                    with st.expander("📘 Reference: The Compounder Formula Guide"):
-                        st.markdown("""
-                        ### 1. The Objective
-                        The goal is to identify **"Compounders"**: companies that generate cash and reinvest it at high rates of return.
-                        
-                        ### 2. Core Definitions
-                        **A. Free Cash Flow (FCF)**
-                        $$FCF = \\text{Operating Cash Flow} - \\text{Capital Expenditures}$$
-
-                        **B. Invested Capital (Operating Approach)**
-                        $$Invested Capital = \\text{Total Assets} - \\text{Total Current Liabilities}$$
-
-                        ### 3. The Efficiency Ratios
-                        **Metric C1: Return on Incremental Invested Capital (ROIIC)**
-                        $$ROIIC = \\frac{\\Delta FCF}{\\Delta IC}$$
-                        *Target: >15-20% indicates a strong competitive advantage.*
-
-                        **Metric C2: Reinvestment Rate**
-                        $$\\text{Reinvestment Rate} = \\frac{\\Delta IC}{\\text{Accumulated FCF}}$$
-                        *Target: 80-100% indicates an aggressive compounder.*
-
-                        ### 4. The Final Compounder Score
-                        $$\\text{Score} = C1 \\times C2$$
-                        This score approximates the sustainable growth rate of the company's intrinsic value.
-                        """)
-
-                else:
-                    st.warning("Insufficient data.")
-            except Exception as e:
-                st.error(f"Calculation Error: {e}")
+                    # 2. Key Metrics Row
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Compounder Score", f"{score:.1%}")
+                    m2.metric("ROIIC", f"{roiic:.1%}")
+                    m3.metric
