@@ -6,102 +6,76 @@ import numpy as np
 # --- 1. PAGE CONFIG & GOOGLE MATERIAL CSS ---
 st.set_page_config(page_title="Compounder Formula", page_icon="📊", layout="wide")
 
-# Custom CSS for Material Design Look
 st.markdown("""
 <style>
-    /* Import Google Font */
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Roboto', sans-serif;
     }
 
-    /* Primary Container Styling (Card-like look) */
     .block-container {
         padding-top: 3rem;
         padding-bottom: 3rem;
         max-width: 1200px;
     }
 
-    /* Header Styling */
     h1 {
         font-weight: 700;
-        color: #202124; /* Google Black */
+        color: #202124;
         font-size: 2.5rem;
         margin-bottom: 0.5rem;
     }
     .subtitle {
-        color: #5f6368; /* Google Gray */
+        color: #5f6368;
         font-size: 1.1rem;
         margin-bottom: 2rem;
     }
 
-    /* Material Cards for Metrics */
+    /* Metric Cards with Targets */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         padding: 20px;
         border-radius: 12px;
         border: 1px solid #e0e0e0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-        transition: all 0.3s cubic-bezier(.25,.8,.25,1);
-    }
-    div[data-testid="stMetric"]:hover {
-        box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
     label[data-testid="stMetricLabel"] {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         color: #5f6368;
         font-weight: 500;
     }
     div[data-testid="stMetricValue"] {
         font-size: 1.8rem;
         font-weight: 700;
-        color: #1a73e8; /* Google Blue */
+        color: #1a73e8;
+    }
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.85rem;
+        color: #3c4043; /* Neutral color for target text */
     }
 
-    /* Custom Button Styling (Material Pill) */
-    .stButton > button {
-        background-color: #1a73e8;
-        color: white;
-        border-radius: 24px;
-        padding: 0.5rem 2rem;
-        font-weight: 500;
-        border: none;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
-        transition: background-color 0.2s, box-shadow 0.2s;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .stButton > button:hover {
-        background-color: #174ea6;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-    }
-
-    /* Report Card Styling */
-    .report-card {
-        background-color: #ffffff;
-        border-radius: 16px;
-        padding: 25px;
-        margin-top: 20px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
-    }
-    
-    /* Table Styling inside Markdown */
+    /* Table Styling */
     table {
         width: 100%;
         border-collapse: collapse;
         font-family: 'Roboto', sans-serif;
+        margin-top: 20px;
+        background-color: #ffffff;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
     th {
         text-align: left;
         color: #5f6368;
-        font-weight: 500;
+        font-weight: 600;
         border-bottom: 2px solid #e0e0e0;
-        padding: 10px;
+        padding: 12px 15px;
+        background-color: #f8f9fa;
     }
     td {
-        padding: 12px 10px;
+        padding: 12px 15px;
         border-bottom: 1px solid #f1f3f4;
         color: #202124;
     }
@@ -110,14 +84,20 @@ st.markdown("""
         font-weight: bold;
         background-color: #f8f9fa;
     }
-
-    /* Dark Mode Overrides (Optional compatibility) */
-    @media (prefers-color-scheme: dark) {
-        h1, .subtitle, td { color: #e8eaed !important; }
-        .report-card, div[data-testid="stMetric"] { background-color: #303134 !important; border-color: #5f6368 !important; }
-        label[data-testid="stMetricLabel"] { color: #9aa0a6 !important; }
-        div[data-testid="stMetricValue"] { color: #8ab4f8 !important; }
+    
+    /* Verdict Tag Styling */
+    .verdict-tag {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-top: 5px;
     }
+    .v-green { background-color: #e6f4ea; color: #137333; }
+    .v-blue { background-color: #e8f0fe; color: #1967d2; }
+    .v-yellow { background-color: #fef7e0; color: #ea8600; }
+    .v-red { background-color: #fce8e6; color: #c5221f; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,7 +167,7 @@ def format_currency(val):
 
 def fetch_data(endpoint_type, company_key, period="annual", limit=30):
     url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/7.0"}
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/9.0"}
     params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -215,7 +195,7 @@ def fetch_data(endpoint_type, company_key, period="annual", limit=30):
     except Exception:
         return pd.DataFrame()
 
-# --- INPUT SECTION (Styled Container) ---
+# --- INPUT SECTION ---
 with st.container():
     with st.spinner("Connecting to database..."):
         company_map = get_company_map()
@@ -255,7 +235,7 @@ with st.container():
     selected_limit = limit_map[timeframe_label]
     include_ttm = "Inc." in timeframe_label
 
-st.write("") # Whitespace
+st.write("") 
 
 # --- ANALYSIS EXECUTION ---
 if target_company_key:
@@ -344,46 +324,44 @@ if target_company_key:
                     reinvest = A2 / A1 if A1 != 0 else 0
                     score = roiic * reinvest
                     
+                    # --- INTERPRETATION LABELS (Source: Compounder Guide) ---
+                    # Logic is applied to Reinvestment Rate [cite: 240, 241, 242]
+                    reinvest_label = ""
+                    if reinvest < 0.20:
+                        reinvest_label = "<span class='verdict-tag v-yellow'>Cash Cow (Mature/Dividends)</span>"
+                    elif 0.80 <= reinvest <= 1.00:
+                        reinvest_label = "<span class='verdict-tag v-green'>Aggressive Compounder</span>"
+                    elif reinvest > 1.00:
+                        reinvest_label = "<span class='verdict-tag v-red'>Investing > Earnings (External Funding)</span>"
+                    else:
+                        reinvest_label = "<span class='verdict-tag v-blue'>Moderate Reinvestment</span>"
+
                     # --- RENDER RESULTS ---
-                    
-                    # 1. Header Card
                     st.markdown(f"<h3>{company_name} Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
                     
-                    # 2. Key Metrics Row
+                    # 1. Key Metrics with Targets (Using 'delta' param for targets)
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("Compounder Score", f"{score:.1%}")
-                    m2.metric("ROIIC", f"{roiic:.1%}")
-                    m3.metric("Reinvestment Rate", f"{reinvest:.1%}")
+                    m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
+                    m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
+                    m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
                     
-                    # 3. The Boardroom Table (Styled via CSS class 'report-card')
-                    # We build the Markdown table first
+                    # 2. Table
                     table_md = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
-                    
                     rows_data = [
                         {"N": f"Total FCF generated ({len(df_final)} yrs)", "V": format_currency(A1), "F": f"$\\sum FCF$", "M": "Accumulated FCF", "L": "A1"},
                         {"N": f"FCF growth: {format_currency(FCF_start)} → {format_currency(FCF_end)}", "V": format_currency(B1), "F": f"$FCF_{{end}} - FCF_{{start}}$", "M": "Increase in FCF", "L": "B1"},
                         {"N": "Capital invested to achieve growth", "V": format_currency(A2), "F": f"$IC_{{end}} - IC_{{start}}$", "M": "Increase in IC", "L": "A2"},
-                        {"N": "Return on New Capital", "V": f"{roiic:.1%}", "F": "$B1 / A2$", "M": "ROIIC", "L": "C1"},
-                        {"N": "% of FCF reinvested", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment Rate", "L": "C2"},
-                        {"N": "Compounder Efficiency Score", "V": f"**{score:.1%}**", "F": "$C1 \\times C2$", "M": "Final Score", "L": "Result"},
+                        {"N": "Return on New Capital", "V": f"{roiic:.1%}", "F": "$B1 / A2$", "M": "ROIIC (>15% Target)", "L": "C1"},
+                        {"N": f"% of FCF reinvested<br>{reinvest_label}", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment (>80% Target)", "L": "C2"},
+                        {"N": "Compounder Efficiency Score", "V": f"**{score:.1%}**", "F": "$C1 \\times C2$", "M": "Score (>20% Target)", "L": "Result"},
                     ]
                     
                     for r in rows_data:
                         table_md += f"| {r['N']} | {r['V']} | {r['F']} | **{r['M']}** | **{r['L']}** |\n"
 
-                    # Wrap in the custom CSS container
-                    st.markdown(f"""
-                    <div class="report-card">
-                        <h4 style="margin-top:0; color:#202124;">Executive Summary</h4>
-                        {st.markdown(table_md, unsafe_allow_html=True) or ""} 
-                    </div>
-                    """, unsafe_allow_html=True)
-                    # Note: We render table_md separately because st.markdown inside HTML strings is tricky. 
-                    # Simpler approach below:
-                    
-                    st.markdown(table_md) # Render standard markdown table (it will pick up our CSS styling)
+                    st.markdown(table_md, unsafe_allow_html=True)
 
-                    # 4. Expanders for Details
+                    # 3. Details & Guide
                     st.write("")
                     with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
                         st.dataframe(df_final.style.format("${:,.0f}"), use_container_width=True)
@@ -393,7 +371,12 @@ if target_company_key:
                         **FCF (Free Cash Flow)** = Operating Cash Flow - CapEx  
                         **IC (Invested Capital)** = Total Assets - Current Liabilities  
                         **ROIIC** = $\Delta$ FCF / $\Delta$ IC (Target > 15%)  
-                        **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)
+                        **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)  
+                        
+                        **Reinvestment Interpretation:** [cite: 240, 241, 242]
+                        * **< 20%:** Cash Cow (Mature, low growth, distributes dividends)
+                        * **80% - 100%:** Aggressive Compounder
+                        * **> 100%:** Company is investing more than it earns (funding via debt/equity)
                         """)
 
                 else:
