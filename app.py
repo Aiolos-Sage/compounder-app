@@ -11,7 +11,6 @@ Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.
 """)
 
 # --- SECURE CONFIGURATION ---
-# We retrieve the key from Streamlit Secrets to keep it safe.
 try:
     API_KEY = st.secrets["FISCAL_API_KEY"]
 except FileNotFoundError:
@@ -26,8 +25,8 @@ BASE_URL = "https://api.fiscal.ai/v1/company/financials"
 # --- INPUT SECTION ---
 ticker_input = st.text_input(
     "Enter Company Key (Format: EXCHANGE_TICKER)", 
-    value="NYSE_APG",
-    help="Examples: NASDAQ_MSFT, NYSE_APG"
+    value="NASDAQ_AMZN",
+    help="Examples: NASDAQ_AMZN, NYSE_APG"
 ).strip().upper()
 
 # --- HELPER FUNCTIONS ---
@@ -44,13 +43,10 @@ def find_col(df, candidates):
 
 def fetch_fiscal_data(endpoint_type, company_key):
     """
-    Fetches data using the 'As Reported' endpoints provided.
-    Includes Headers and User-Agent to prevent 403 Blocking.
+    Fetches data and UNPACKS the 'metricsValues' nested dictionary.
     """
     url = f"{BASE_URL}/{endpoint_type}/as-reported"
     
-    # We send the key in the Header (Standard Practice) AND Query Param (User URL)
-    # Adding a User-Agent is critical to not look like a bot.
     headers = {
         "X-API-KEY": API_KEY,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -59,8 +55,8 @@ def fetch_fiscal_data(endpoint_type, company_key):
     params = {
         "companyKey": company_key,
         "periodType": "annual",
-        "currency": "USD", # Standardize currency
-        "apiKey": API_KEY  # Sending in both places ensures maximum compatibility
+        "currency": "USD",
+        "apiKey": API_KEY 
     }
     
     try:
@@ -68,24 +64,33 @@ def fetch_fiscal_data(endpoint_type, company_key):
         
         if response.status_code != 200:
             st.error(f"API Error ({endpoint_type}): {response.status_code}")
-            try:
-                # Print the exact error message from Fiscal.ai for debugging
-                st.json(response.json())
-            except:
-                st.write(response.text)
             return pd.DataFrame()
 
         data = response.json()
         
-        # Standardize Data (Fiscal.ai often wraps data in a 'data' key)
+        # Standardize Data
         rows = data.get('data', data) if isinstance(data, dict) else data
         
         if not rows: 
             return pd.DataFrame()
             
-        df = pd.DataFrame(rows)
+        # --- NEW: UNPACKING LOGIC ---
+        # The financial data is hidden inside 'metricsValues'. We must extract it.
+        flattened_rows = []
+        for row in rows:
+            # 1. Start with metadata (dates, ids)
+            clean_row = {k: v for k, v in row.items() if k != 'metricsValues'}
+            
+            # 2. Extract nested metrics and merge them to top level
+            metrics = row.get('metricsValues', {})
+            if isinstance(metrics, dict):
+                clean_row.update(metrics)
+            
+            flattened_rows.append(clean_row)
+            
+        df = pd.DataFrame(flattened_rows)
         
-        # Handle Dates (fiscalDate or date)
+        # Handle Dates
         if 'fiscalDate' in df.columns:
             df['date'] = pd.to_datetime(df['fiscalDate'])
         elif 'date' in df.columns:
@@ -103,22 +108,35 @@ def fetch_fiscal_data(endpoint_type, company_key):
 # --- MAIN LOGIC ---
 if st.button("Run Analysis"):
     if "_" not in ticker_input:
-        st.warning("⚠️ Format required: EXCHANGE_TICKER (e.g., NYSE_APG)")
+        st.warning("⚠️ Format required: EXCHANGE_TICKER (e.g., NASDAQ_AMZN)")
     else:
         with st.spinner(f"Fetching reports for {ticker_input}..."):
             
-            # 1. Fetch Reports (Cash Flow & Balance Sheet)
+            # 1. Fetch Reports
             cf_df = fetch_fiscal_data("cash-flow-statement", ticker_input)
             bs_df = fetch_fiscal_data("balance-sheet", ticker_input)
 
             if cf_df.empty or bs_df.empty:
                 st.error("No data returned. Check the ticker format or API limits.")
             else:
-                # 2. Extract Columns (Smart Search for column variations)
-                ocf = find_col(cf_df, ['operatingCashFlow', 'netCashProvidedByOperatingActivities', 'NetCashFromOperatingActivities'])
-                capex = find_col(cf_df, ['capitalExpenditure', 'paymentsForCapitalExpenditure', 'capex'])
-                assets = find_col(bs_df, ['totalAssets', 'assets'])
-                curr_liab = find_col(bs_df, ['totalCurrentLiabilities', 'currentLiabilities'])
+                # 2. Extract Columns (Expanded Search Terms for 'As Reported')
+                # We add more potential keywords since raw reports vary by company
+                ocf = find_col(cf_df, [
+                    'operatingCashFlow', 
+                    'netCashProvidedByOperatingActivities', 
+                    'NetCashFromOperatingActivities',
+                    'CashProvidedByUsedInOperatingActivities'
+                ])
+                
+                capex = find_col(cf_df, [
+                    'capitalExpenditure', 
+                    'paymentsForCapitalExpenditure', 
+                    'capex',
+                    'PaymentsToAcquirePropertyPlantAndEquipment'
+                ])
+                
+                assets = find_col(bs_df, ['totalAssets', 'assets', 'Assets'])
+                curr_liab = find_col(bs_df, ['totalCurrentLiabilities', 'currentLiabilities', 'LiabilitiesCurrent'])
 
                 # 3. Calculate Formula
                 if ocf is not None and assets is not None:
@@ -126,8 +144,9 @@ if st.button("Run Analysis"):
                     capex = capex if capex is not None else 0
                     curr_liab = curr_liab if curr_liab is not None else 0
                     
-                    # Logic: FCF = OCF + CapEx (If CapEx is negative outflow, we add it. If positive, subtract.)
-                    # We assume standard API return where outflows are negative.
+                    # Logic: FCF = OCF + CapEx 
+                    # Note: API usually returns CapEx as negative. If positive, we subtract.
+                    # Safety check: ensure we are subtracting the COST.
                     fcf_series = ocf + capex
                     
                     # Logic: Invested Capital = Total Assets - Current Liabilities
@@ -143,7 +162,6 @@ if st.button("Run Analysis"):
                         # 4. Compute Growth Metrics
                         start, end = df_calc.index[0], df_calc.index[-1]
                         
-                        # Values
                         A1_accum_fcf = df_calc['FCF'].sum()
                         B1_delta_fcf = df_calc.loc[end, 'FCF'] - df_calc.loc[start, 'FCF']
                         A2_delta_ic = df_calc.loc[end, 'Invested_Capital'] - df_calc.loc[start, 'Invested_Capital']
@@ -158,27 +176,21 @@ if st.button("Run Analysis"):
                         st.subheader(f"Analysis: {ticker_input}")
                         st.caption(f"Period: {start.year} - {end.year}")
                         
-                        # Top Metrics
                         col1, col2, col3 = st.columns(3)
                         col1.metric("Compounder Score", f"{score:.1%}")
                         col2.metric("ROIIC", f"{roiic:.1%}")
                         col3.metric("Reinvestment Rate", f"{reinvest:.1%}")
                         
-                        # Verdict Logic
-                        if score > 0.15: 
-                            st.success("✅ **High Probability Compounder** (>15%)")
-                        elif score > 0.10: 
-                            st.warning("⚠️ **Moderate Compounder** (10-15%)")
-                        else: 
-                            st.error("❌ **Low Efficiency** (<10%)")
+                        if score > 0.15: st.success("✅ **High Probability Compounder**")
+                        elif score > 0.10: st.warning("⚠️ **Moderate Compounder**")
+                        else: st.error("❌ **Low Efficiency**")
                         
-                        # Detailed Data View
                         with st.expander("View Underlying Data"):
                             st.write("Calculated Data (USD):")
                             st.dataframe(df_calc.style.format("${:,.0f}"))
                     else:
-                        st.warning("Not enough historical data points to calculate growth (Need 2+ years).")
+                        st.warning("Not enough historical data points.")
                 else:
-                    st.error("Could not identify required columns (OCF or Total Assets) in the API response.")
+                    st.error("Could not identify required columns.")
                     st.write("Columns found in Cash Flow:", cf_df.columns.tolist())
                     st.write("Columns found in Balance Sheet:", bs_df.columns.tolist())
