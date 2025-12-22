@@ -21,40 +21,21 @@ LIST_URL = "https://api.fiscal.ai/v2/companies-list"
 
 # --- CACHED DATA LOADING ---
 @st.cache_data(ttl=3600)
-def get_company_map():
+def get_company_list():
     """
-    Fetches the company list (Name + Ticker) for the search bar.
+    Fetches the raw company list. Returns the full list of dicts.
     """
     headers = {"X-API-KEY": API_KEY}
-    # Increased to 5000 to capture more companies
     params = {"pageNumber": 1, "pageSize": 5000, "apiKey": API_KEY}
     
     try:
         response = requests.get(LIST_URL, headers=headers, params=params)
         if response.status_code != 200:
-            return {}
-            
+            return []
         data = response.json()
-        rows = data.get('data', data) if isinstance(data, dict) else data
-        
-        company_map = {}
-        for row in rows:
-            ticker = row.get('ticker', 'UNKNOWN')
-            exchange = row.get('exchange', 'UNKNOWN')
-            name = row.get('companyName', row.get('name', ticker))
-            
-            # Key for API calls
-            full_key = f"{exchange}_{ticker}"
-            
-            # Label for the Dropdown (User Friendly)
-            # Format: "Amazon.com Inc (AMZN) - NASDAQ"
-            display_label = f"{name} ({ticker}) - {exchange}"
-            
-            company_map[display_label] = full_key
-            
-        return company_map
+        return data.get('data', data) if isinstance(data, dict) else data
     except Exception:
-        return {}
+        return []
 
 # --- HELPER FUNCTIONS ---
 def clean_value(val):
@@ -105,47 +86,71 @@ def fetch_and_process(endpoint_type, company_key):
         st.error(f"Connection Error: {e}")
         return pd.DataFrame()
 
-# --- MAIN PAGE LAYOUT ---
+# --- SIDEBAR & SETUP ---
+raw_companies = get_company_list()
 
-# 1. Load Data
-with st.spinner("Loading company database..."):
-    company_map = get_company_map()
+# Process list for dropdown
+company_map = {}
+for row in raw_companies:
+    ticker = row.get('ticker', 'UNKNOWN')
+    name = row.get('companyName', row.get('name', ticker))
+    
+    # SMART EXCHANGE DETECTION
+    # Tries multiple keys to find the exchange. Defaults to 'UNKNOWN' if missing.
+    exchange = row.get('exchange', row.get('exchangeShortName', row.get('exchangeCode', 'UNKNOWN')))
+    
+    full_key = f"{exchange}_{ticker}"
+    display_label = f"{name} ({ticker}) - {exchange}"
+    company_map[display_label] = full_key
 
-# 2. Large Search Bar (Main Body)
-st.write("") # Spacer
+# --- MAIN LAYOUT ---
+
+# 1. Search Dropdown
+st.write("### 1. Select Company")
 if company_map:
     selected_label = st.selectbox(
-        "🔎 **Search for a Company** (Type name or ticker)", 
+        "Search database:", 
         options=list(company_map.keys()),
-        index=None, # Defaults to empty
-        placeholder="Start typing... e.g. Amazon, Apple, MSFT"
+        index=None,
+        placeholder="Type to search (e.g. Amazon)..."
     )
-    
-    # Get the ID (e.g. NASDAQ_AMZN)
-    target_company_key = company_map[selected_label] if selected_label else None
 else:
-    st.warning("⚠️ Could not load company list. Please check API connectivity.")
-    target_company_key = st.text_input("Enter Company Key manually:", "NASDAQ_AMZN")
+    st.warning("Could not load company list. Check API Key.")
+    selected_label = None
+
+# 2. Key Confirmation (The Fix)
+st.write("### 2. Confirm Ticker Key")
+# If user selects from dropdown, autofill the input. Otherwise, keep existing input.
+if selected_label:
+    default_key = company_map[selected_label]
+else:
+    default_key = "NASDAQ_AMZN"
+
+# User can EDIT this. If it says "UNKNOWN_AMZN", they can fix it to "NASDAQ_AMZN"
+target_company_key = st.text_input(
+    "Verify format is EXCHANGE_TICKER:", 
+    value=default_key,
+    help="If the exchange is UNKNOWN, manually type NASDAQ, NYSE, etc."
+).strip().upper()
 
 
-# 3. Analysis Section
+# 3. Run Analysis
 st.divider()
-
-if target_company_key:
-    # Run button is now centered/prominent under the search
-    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-        st.subheader(f"Analysis: {selected_label if selected_label else target_company_key}")
-        
+if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+    if "UNKNOWN" in target_company_key:
+        st.warning("⚠️ 'UNKNOWN' exchange detected. Please manually change 'UNKNOWN' to 'NASDAQ' or 'NYSE' in the box above.")
+    else:
+        st.subheader(f"Analysis: {target_company_key}")
         with st.spinner(f"Crunching numbers for {target_company_key}..."):
             
             cf_df = fetch_and_process("cash-flow-statement", target_company_key)
             bs_df = fetch_and_process("balance-sheet", target_company_key)
 
             if cf_df.empty or bs_df.empty:
-                st.error("No financial data returned for this company.")
+                st.error("No financial data found. Check the ticker format.")
             else:
                 try:
-                    # Extract
+                    # Extract Columns
                     ocf_raw = cf_df.get('cash_flow_statement_cash_from_operating_activities')
                     capex_raw = cf_df.get('cash_flow_statement_capital_expenditure')
                     if capex_raw is None:
@@ -184,11 +189,10 @@ if target_company_key:
                             
                             # Display
                             st.markdown(f"**Period Analyzed:** {s_year} - {e_year}")
-                            
                             c1, c2, c3 = st.columns(3)
-                            c1.metric("Compounder Score", f"{score:.1%}", help="ROIIC x Reinvestment Rate")
-                            c2.metric("ROIIC", f"{roiic:.1%}", help="Return on Incremental Invested Capital")
-                            c3.metric("Reinvestment Rate", f"{reinvest:.1%}", help="% of Cash Flow reinvested")
+                            c1.metric("Compounder Score", f"{score:.1%}")
+                            c2.metric("ROIIC", f"{roiic:.1%}")
+                            c3.metric("Reinvestment Rate", f"{reinvest:.1%}")
                             
                             if score > 0.15: st.success("✅ **High Probability Compounder**")
                             elif score > 0.10: st.warning("⚠️ **Moderate Compounder**")
@@ -197,10 +201,16 @@ if target_company_key:
                             with st.expander("View Calculation Data"):
                                 st.dataframe(df_calc.style.format("${:,.0f}"))
                         else:
-                            st.warning("Insufficient historical data (Need 2+ years).")
+                            st.warning("Insufficient historical data.")
                     else:
                         st.error("Required data columns missing.")
                 except Exception as e:
                     st.error(f"Calculation Error: {e}")
-else:
-    st.info("👆 Use the search bar above to select a company.")
+
+# --- DEBUG SECTION ---
+# Use this to see what the correct "Exchange" field name is in the API
+with st.expander("🛠️ Debug: View Raw API Data"):
+    if raw_companies:
+        st.write("First company in database:", raw_companies[0])
+    else:
+        st.write("No company data loaded.")
