@@ -5,7 +5,7 @@ import pandas as pd
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Compounder Formula", page_icon="📈")
 
-st.title("📈 Compounder Dashboard (Fiscal.ai)")
+st.title("📈 Compounder Dashboard")
 st.markdown("""
 Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.
 """)
@@ -13,11 +13,8 @@ Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.
 # --- SECURE CONFIGURATION ---
 try:
     API_KEY = st.secrets["FISCAL_API_KEY"]
-except FileNotFoundError:
-    st.error("Secrets file not found. Please set up your secrets.toml file.")
-    st.stop()
-except KeyError:
-    st.error("API Key not found in secrets. Please add 'FISCAL_API_KEY' to your secrets.")
+except (FileNotFoundError, KeyError):
+    st.error("⚠️ API Key missing. Please add 'FISCAL_API_KEY' to your Streamlit Secrets.")
     st.stop()
 
 BASE_URL = "https://api.fiscal.ai/v1/company/financials"
@@ -32,7 +29,7 @@ ticker_input = st.text_input(
 # --- HELPER FUNCTIONS ---
 def find_col(df, candidates):
     """
-    Helper to find the correct column name regardless of capitalization.
+    Finds a column from a list of potential names (case-insensitive).
     """
     if df is None or df.empty: return None
     col_map = {c.lower(): c for c in df.columns}
@@ -41,15 +38,17 @@ def find_col(df, candidates):
             return df[col_map[cand.lower()]]
     return None
 
-def fetch_fiscal_data(endpoint_type, company_key):
+def fetch_standardized_data(endpoint_type, company_key):
     """
-    Fetches data and UNPACKS the 'metricsValues' nested dictionary.
+    Fetches data from the STANDARDIZED endpoint.
+    Automatically unpacks 'metricsValues' if present.
     """
-    url = f"{BASE_URL}/{endpoint_type}/as-reported"
+    # URL Structure based on your reference
+    url = f"{BASE_URL}/{endpoint_type}/standardized"
     
     headers = {
         "X-API-KEY": API_KEY,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "StreamlitCompounder/1.0"
     }
     
     params = {
@@ -68,29 +67,24 @@ def fetch_fiscal_data(endpoint_type, company_key):
 
         data = response.json()
         
-        # Standardize Data
+        # Standardize Data List
         rows = data.get('data', data) if isinstance(data, dict) else data
-        
-        if not rows: 
-            return pd.DataFrame()
+        if not rows: return pd.DataFrame()
             
-        # --- NEW: UNPACKING LOGIC ---
-        # The financial data is hidden inside 'metricsValues'. We must extract it.
-        flattened_rows = []
+        # --- ROBUST UNPACKING ---
+        # Checks if data is flat or nested in 'metricsValues'
+        clean_rows = []
         for row in rows:
-            # 1. Start with metadata (dates, ids)
-            clean_row = {k: v for k, v in row.items() if k != 'metricsValues'}
-            
-            # 2. Extract nested metrics and merge them to top level
+            # If 'metricsValues' exists, extract it. Otherwise, use the row as is.
+            base_data = {k: v for k, v in row.items() if k != 'metricsValues'}
             metrics = row.get('metricsValues', {})
             if isinstance(metrics, dict):
-                clean_row.update(metrics)
+                base_data.update(metrics)
+            clean_rows.append(base_data)
             
-            flattened_rows.append(clean_row)
-            
-        df = pd.DataFrame(flattened_rows)
+        df = pd.DataFrame(clean_rows)
         
-        # Handle Dates
+        # Handle Dates (fiscalDate is standard, but we check both)
         if 'fiscalDate' in df.columns:
             df['date'] = pd.to_datetime(df['fiscalDate'])
         elif 'date' in df.columns:
@@ -110,68 +104,53 @@ if st.button("Run Analysis"):
     if "_" not in ticker_input:
         st.warning("⚠️ Format required: EXCHANGE_TICKER (e.g., NASDAQ_AMZN)")
     else:
-        with st.spinner(f"Fetching reports for {ticker_input}..."):
+        with st.spinner(f"Fetching standardized data for {ticker_input}..."):
             
-            # 1. Fetch Reports
-            cf_df = fetch_fiscal_data("cash-flow-statement", ticker_input)
-            bs_df = fetch_fiscal_data("balance-sheet", ticker_input)
+            # 1. Fetch Standardized Reports
+            cf_df = fetch_standardized_data("cash-flow-statement", ticker_input)
+            bs_df = fetch_standardized_data("balance-sheet", ticker_input)
 
             if cf_df.empty or bs_df.empty:
-                st.error("No data returned. Check the ticker format or API limits.")
+                st.error("No data returned. Check the ticker format.")
             else:
-                # 2. Extract Columns (Expanded Search Terms for 'As Reported')
-                # We add more potential keywords since raw reports vary by company
-                ocf = find_col(cf_df, [
-                    'operatingCashFlow', 
-                    'netCashProvidedByOperatingActivities', 
-                    'NetCashFromOperatingActivities',
-                    'CashProvidedByUsedInOperatingActivities'
-                ])
+                # 2. Extract Columns (Using Standardized Keys)
+                # Fiscal.ai standardized keys are typically camelCase or snake_case
                 
-                capex = find_col(cf_df, [
-                    'capitalExpenditure', 
-                    'paymentsForCapitalExpenditure', 
-                    'capex',
-                    'PaymentsToAcquirePropertyPlantAndEquipment'
-                ])
-                
-                assets = find_col(bs_df, ['totalAssets', 'assets', 'Assets'])
-                curr_liab = find_col(bs_df, ['totalCurrentLiabilities', 'currentLiabilities', 'LiabilitiesCurrent'])
+                ocf = find_col(cf_df, ['operatingCashFlow', 'operating_cash_flow'])
+                capex = find_col(cf_df, ['capitalExpenditure', 'capital_expenditure'])
+                assets = find_col(bs_df, ['totalAssets', 'total_assets'])
+                curr_liab = find_col(bs_df, ['totalCurrentLiabilities', 'total_current_liabilities'])
 
-                # 3. Calculate Formula
+                # 3. Validation & Calculation
                 if ocf is not None and assets is not None:
-                    # Clean optional columns
                     capex = capex if capex is not None else 0
                     curr_liab = curr_liab if curr_liab is not None else 0
                     
-                    # Logic: FCF = OCF + CapEx 
-                    # Note: API usually returns CapEx as negative. If positive, we subtract.
-                    # Safety check: ensure we are subtracting the COST.
+                    # Logic: FCF = OCF + CapEx (Standardized usually has negative CapEx)
                     fcf_series = ocf + capex
                     
                     # Logic: Invested Capital = Total Assets - Current Liabilities
                     ic_series = assets - curr_liab
                     
-                    # Create Calculation DataFrame
+                    # Merge & Clean
                     df_calc = pd.DataFrame({
                         'FCF': fcf_series, 
                         'Invested_Capital': ic_series
                     }).dropna()
 
                     if len(df_calc) >= 2:
-                        # 4. Compute Growth Metrics
+                        # 4. Compute Metrics
                         start, end = df_calc.index[0], df_calc.index[-1]
                         
-                        A1_accum_fcf = df_calc['FCF'].sum()
-                        B1_delta_fcf = df_calc.loc[end, 'FCF'] - df_calc.loc[start, 'FCF']
-                        A2_delta_ic = df_calc.loc[end, 'Invested_Capital'] - df_calc.loc[start, 'Invested_Capital']
+                        A1 = df_calc['FCF'].sum()
+                        B1 = df_calc.loc[end, 'FCF'] - df_calc.loc[start, 'FCF']
+                        A2 = df_calc.loc[end, 'Invested_Capital'] - df_calc.loc[start, 'Invested_Capital']
                         
-                        # Ratios
-                        roiic = B1_delta_fcf / A2_delta_ic if A2_delta_ic != 0 else 0
-                        reinvest = A2_delta_ic / A1_accum_fcf if A1_accum_fcf != 0 else 0
+                        roiic = B1 / A2 if A2 != 0 else 0
+                        reinvest = A2 / A1 if A1 != 0 else 0
                         score = roiic * reinvest
                         
-                        # --- DASHBOARD OUTPUT ---
+                        # --- OUTPUT ---
                         st.divider()
                         st.subheader(f"Analysis: {ticker_input}")
                         st.caption(f"Period: {start.year} - {end.year}")
@@ -186,11 +165,10 @@ if st.button("Run Analysis"):
                         else: st.error("❌ **Low Efficiency**")
                         
                         with st.expander("View Underlying Data"):
-                            st.write("Calculated Data (USD):")
                             st.dataframe(df_calc.style.format("${:,.0f}"))
                     else:
-                        st.warning("Not enough historical data points.")
+                        st.warning("Not enough historical data points (Need 2+ years).")
                 else:
-                    st.error("Could not identify required columns.")
-                    st.write("Columns found in Cash Flow:", cf_df.columns.tolist())
-                    st.write("Columns found in Balance Sheet:", bs_df.columns.tolist())
+                    st.error("Could not find required columns in standardized data.")
+                    st.write("Available CF Keys:", cf_df.columns.tolist())
+                    st.write("Available BS Keys:", bs_df.columns.tolist())
