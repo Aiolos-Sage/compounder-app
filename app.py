@@ -32,7 +32,7 @@ st.markdown("""
         margin-bottom: 2rem;
     }
 
-    /* Metric Cards with Targets */
+    /* Metric Cards */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         padding: 20px;
@@ -52,7 +52,7 @@ st.markdown("""
     }
     div[data-testid="stMetricDelta"] {
         font-size: 0.85rem;
-        color: #3c4043; /* Neutral color for target text */
+        color: #3c4043;
     }
 
     /* Table Styling */
@@ -84,20 +84,6 @@ st.markdown("""
         font-weight: bold;
         background-color: #f8f9fa;
     }
-    
-    /* Verdict Tag Styling */
-    .verdict-tag {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        margin-top: 5px;
-    }
-    .v-green { background-color: #e6f4ea; color: #137333; }
-    .v-blue { background-color: #e8f0fe; color: #1967d2; }
-    .v-yellow { background-color: #fef7e0; color: #ea8600; }
-    .v-red { background-color: #fce8e6; color: #c5221f; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -167,7 +153,7 @@ def format_currency(val):
 
 def fetch_data(endpoint_type, company_key, period="annual", limit=30):
     url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/9.0"}
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/10.0"}
     params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -324,35 +310,46 @@ if target_company_key:
                     reinvest = A2 / A1 if A1 != 0 else 0
                     score = roiic * reinvest
                     
-                    # --- INTERPRETATION LABELS (Source: Compounder Guide) ---
-                    # Logic is applied to Reinvestment Rate [cite: 240, 241, 242]
-                    reinvest_label = ""
+                    # --- DETERMINE VERDICT (Logic Below Table) ---
+                    # Defines the text, background color, and text color based on result
+                    verdict_text = ""
+                    bg_color = ""
+                    text_color = ""
+                    
                     if reinvest < 0.20:
-                        reinvest_label = "<span class='verdict-tag v-yellow'>Cash Cow (Mature/Dividends)</span>"
+                        verdict_text = "Cash Cow (Mature, low growth, distributes dividends)"
+                        bg_color = "#fef7e0" # Light Yellow
+                        text_color = "#b06000" # Dark Gold
                     elif 0.80 <= reinvest <= 1.00:
-                        reinvest_label = "<span class='verdict-tag v-green'>Aggressive Compounder</span>"
+                        verdict_text = "Aggressive Compounder"
+                        bg_color = "#e6f4ea" # Light Green
+                        text_color = "#137333" # Google Green
                     elif reinvest > 1.00:
-                        reinvest_label = "<span class='verdict-tag v-red'>Investing > Earnings (External Funding)</span>"
+                        verdict_text = "Company is investing more than it earns (funding via debt or equity)"
+                        bg_color = "#fce8e6" # Light Red
+                        text_color = "#c5221f" # Google Red
                     else:
-                        reinvest_label = "<span class='verdict-tag v-blue'>Moderate Reinvestment</span>"
+                        verdict_text = "Moderate Reinvestment (Standard Growth)"
+                        bg_color = "#e8f0fe" # Light Blue
+                        text_color = "#1967d2" # Google Blue
 
                     # --- RENDER RESULTS ---
                     st.markdown(f"<h3>{company_name} Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
                     
-                    # 1. Key Metrics with Targets (Using 'delta' param for targets)
+                    # 1. Metrics
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
                     m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
                     m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
                     
-                    # 2. Table
+                    # 2. Table (No label in row C2)
                     table_md = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
                     rows_data = [
                         {"N": f"Total FCF generated ({len(df_final)} yrs)", "V": format_currency(A1), "F": f"$\\sum FCF$", "M": "Accumulated FCF", "L": "A1"},
                         {"N": f"FCF growth: {format_currency(FCF_start)} → {format_currency(FCF_end)}", "V": format_currency(B1), "F": f"$FCF_{{end}} - FCF_{{start}}$", "M": "Increase in FCF", "L": "B1"},
                         {"N": "Capital invested to achieve growth", "V": format_currency(A2), "F": f"$IC_{{end}} - IC_{{start}}$", "M": "Increase in IC", "L": "A2"},
                         {"N": "Return on New Capital", "V": f"{roiic:.1%}", "F": "$B1 / A2$", "M": "ROIIC (>15% Target)", "L": "C1"},
-                        {"N": f"% of FCF reinvested<br>{reinvest_label}", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment (>80% Target)", "L": "C2"},
+                        {"N": "% of FCF reinvested", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment (>80% Target)", "L": "C2"},
                         {"N": "Compounder Efficiency Score", "V": f"**{score:.1%}**", "F": "$C1 \\times C2$", "M": "Score (>20% Target)", "L": "Result"},
                     ]
                     
@@ -360,8 +357,27 @@ if target_company_key:
                         table_md += f"| {r['N']} | {r['V']} | {r['F']} | **{r['M']}** | **{r['L']}** |\n"
 
                     st.markdown(table_md, unsafe_allow_html=True)
+                    
+                    # 3. VERDICT ROW (New Dynamic Component)
+                    st.markdown(f"""
+                    <div style="
+                        background-color: {bg_color}; 
+                        padding: 16px; 
+                        border-radius: 8px; 
+                        margin-top: 15px; 
+                        border: 1px solid {bg_color};
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                    ">
+                        <span style="font-size: 1.2rem;">🧬</span>
+                        <span style="color: {text_color}; font-weight: 600; font-size: 1rem;">
+                            Corporate Phase: {verdict_text}
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                    # 3. Details & Guide
+                    # 4. Details & Guide
                     st.write("")
                     with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
                         st.dataframe(df_final.style.format("${:,.0f}"), use_container_width=True)
@@ -373,7 +389,7 @@ if target_company_key:
                         **ROIIC** = $\Delta$ FCF / $\Delta$ IC (Target > 15%)  
                         **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)  
                         
-                        **Reinvestment Interpretation:** [cite: 240, 241, 242]
+                        **Reinvestment Interpretation:**
                         * **< 20%:** Cash Cow (Mature, low growth, distributes dividends)
                         * **80% - 100%:** Aggressive Compounder
                         * **> 100%:** Company is investing more than it earns (funding via debt/equity)
