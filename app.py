@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 
@@ -89,11 +89,60 @@ st.markdown("""
 
 # --- HEADER ---
 st.markdown("<h1>Compounder Dashboard</h1>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Analyze capital allocation efficiency using the Compounder Formula. (Source: Yahoo Finance)</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Analyze capital allocation efficiency using the Compounder Formula.</div>", unsafe_allow_html=True)
 
-# --- HELPER FUNCTIONS ---
+# --- SECURE CONFIGURATION ---
+try:
+    API_KEY = st.secrets["FISCAL_API_KEY"]
+except (FileNotFoundError, KeyError):
+    st.error("⚠️ API Key missing. Please add 'FISCAL_API_KEY' to your Streamlit Secrets.")
+    st.stop()
+
+BASE_URL = "https://api.fiscal.ai/v1/company/financials"
+LIST_URL = "https://api.fiscal.ai/v2/companies-list"
+
+# --- LOGIC & HELPERS ---
+def normalize_exchange(exchange_name):
+    if not exchange_name: return "UNKNOWN"
+    name = str(exchange_name).upper()
+    if "NASDAQ" in name: return "NASDAQ"
+    if "NEW YORK" in name or "NYSE" in name: return "NYSE"
+    if "LONDON" in name or "LSE" in name: return "LSE"
+    if "TORONTO" in name or "TSX" in name: return "TSX"
+    if "AMEX" in name: return "AMEX"
+    if "OTC" in name: return "OTC"
+    return name.split(' ')[0]
+
+@st.cache_data(ttl=3600)
+def get_company_map():
+    headers = {"X-API-KEY": API_KEY}
+    params = {"pageNumber": 1, "pageSize": 6000, "apiKey": API_KEY}
+    try:
+        response = requests.get(LIST_URL, headers=headers, params=params)
+        if response.status_code != 200: return {}
+        data = response.json()
+        rows = data.get('data', data) if isinstance(data, dict) else data
+        company_map = {}
+        for row in rows:
+            ticker = row.get('ticker')
+            name = row.get('companyName', row.get('name', ticker))
+            raw_exchange = row.get('exchangeName', row.get('exchange', 'UNKNOWN'))
+            exchange_prefix = normalize_exchange(raw_exchange)
+            if ticker and exchange_prefix != "UNKNOWN":
+                full_key = f"{exchange_prefix}_{ticker}"
+                label = f"{name} ({ticker})"
+                company_map[label] = full_key
+        return company_map
+    except Exception:
+        return {}
+
+def clean_value(val):
+    if isinstance(val, dict):
+        return val.get('value', val.get('raw', val.get('amount', 0)))
+    return val
+
 def format_currency(val):
-    if val is None or pd.isna(val): return "N/A"
+    if val is None: return "N/A"
     abs_val = abs(val)
     if abs_val >= 1e9:
         return f"${val/1e9:,.2f} B"
@@ -102,226 +151,198 @@ def format_currency(val):
     else:
         return f"${val:,.0f}"
 
-def get_yfinance_data(ticker_symbol):
-    """
-    Fetches data using yfinance (Free, No API Key).
-    Returns Annual and Quarterly DataFrames for Cash Flow and Balance Sheet.
-    """
-    stock = yf.Ticker(ticker_symbol)
-    
-    # Fetch Data
-    # yfinance returns data with Dates as Columns. We transpose to make Dates the Index.
+def fetch_data(endpoint_type, company_key, period="annual", limit=30):
+    url = f"{BASE_URL}/{endpoint_type}/standardized"
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/10.0"}
+    params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
     try:
-        cf_annual = stock.cashflow.T
-        bs_annual = stock.balance_sheet.T
-        cf_q = stock.quarterly_cashflow.T
-        bs_q = stock.quarterly_balance_sheet.T
-        
-        # Get Company Name
-        try:
-            info = stock.info
-            name = info.get('longName', ticker_symbol)
-        except:
-            name = ticker_symbol
-            
-        return name, cf_annual, bs_annual, cf_q, bs_q
-        
-    except Exception as e:
-        return None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-def process_financials(cf_df, bs_df):
-    """
-    Extracts FCF and Invested Capital from yfinance DataFrames.
-    """
-    if cf_df.empty or bs_df.empty: return None
-
-    # yfinance Key Mapping
-    # Note: Keys can vary slightly, so we use .get() with defaults
-    try:
-        # 1. Operating Cash Flow
-        # yfinance usually calls it 'Operating Cash Flow' or 'Total Cash From Operating Activities'
-        ocf = cf_df.get('Operating Cash Flow')
-        if ocf is None: ocf = cf_df.get('Total Cash From Operating Activities')
-        
-        # 2. CapEx
-        # yfinance CapEx is usually negative. We need the absolute value for subtraction.
-        capex = cf_df.get('Capital Expenditure')
-        if capex is None: capex = cf_df.get('Capital Expenditures')
-        
-        # 3. Invested Capital Components
-        assets = bs_df.get('Total Assets')
-        curr_liab = bs_df.get('Current Liabilities')
-        if curr_liab is None: curr_liab = bs_df.get('Total Current Liabilities')
-
-        # Validation
-        if ocf is None or assets is None:
-            return None
-
-        # Clean NaNs
-        ocf = ocf.fillna(0)
-        capex = capex.fillna(0) if capex is not None else 0
-        assets = assets.fillna(0)
-        curr_liab = curr_liab.fillna(0) if curr_liab is not None else 0
-
-        # Calculate Variables
-        # FCF = OCF - |CapEx|  (Using abs ensures we subtract the cost)
-        fcf_series = ocf - abs(capex)
-        
-        # IC = Total Assets - Current Liabilities
-        ic_series = assets - curr_liab
-
-        # Create DataFrame
-        df = pd.DataFrame({
-            'FCF': fcf_series,
-            'Invested_Capital': ic_series
-        })
-        
-        # Ensure Index is Datetime and Sorted
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index(ascending=True)
-        
-        return df.dropna()
-
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != 200: return pd.DataFrame()
+        data = response.json()
+        rows = data.get('data', data) if isinstance(data, dict) else data
+        if not rows: return pd.DataFrame()
+        clean_rows = []
+        for row in rows:
+            base_data = {k: v for k, v in row.items() if k != 'metricsValues'}
+            metrics = row.get('metricsValues', {})
+            if isinstance(metrics, dict):
+                cleaned_metrics = {k: clean_value(v) for k, v in metrics.items()}
+                base_data.update(cleaned_metrics)
+            clean_rows.append(base_data)
+        df = pd.DataFrame(clean_rows)
+        date_col = None
+        if 'reportDate' in df.columns: date_col = 'reportDate'
+        elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
+        elif 'date' in df.columns: date_col = 'date'
+        if date_col:
+            df['date_index'] = pd.to_datetime(df[date_col])
+            df = df.sort_values(by='date_index', ascending=True).set_index('date_index')
+        return df
     except Exception:
-        return None
+        return pd.DataFrame()
 
 # --- INPUT SECTION ---
-col_input, col_time = st.columns([2, 1])
+with st.container():
+    with st.spinner("Connecting to database..."):
+        company_map = get_company_map()
 
-with col_input:
-    # yfinance doesn't support easy "search by name", so we use a text input for Ticker.
-    ticker_input = st.text_input("Enter Ticker Symbol", value="GOOG", placeholder="e.g. AAPL, MSFT, NVDA").upper()
-
-with col_time:
-    timeframe_label = st.selectbox(
-        "Timeframe",
-        options=[
-            "5 Years (Inc. YTD/TTM)", "Last 5 Fiscal Years",
-            "10 Years (Inc. YTD/TTM)", "Last 10 Fiscal Years",
-            "20 Years (Inc. YTD/TTM)", "Last 20 Fiscal Years"
-        ],
-        index=2
-    )
-
-limit_map = {
-    "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
-    "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
-    "20 Years (Inc. YTD/TTM)": 20, "Last 20 Fiscal Years": 20
-}
-selected_limit = limit_map[timeframe_label]
-include_ttm = "Inc." in timeframe_label
-
-st.divider()
-
-# --- MAIN LOGIC ---
-if st.button("Run Analysis", type="primary"):
-    with st.spinner(f"Fetching data for {ticker_input} from Yahoo Finance..."):
-        
-        # 1. Fetch Raw Data
-        name, cf_annual, bs_annual, cf_q, bs_q = get_yfinance_data(ticker_input)
-        
-        if cf_annual.empty:
-            st.error(f"Could not find financial data for **{ticker_input}**. Please check the ticker symbol.")
+    col_search, col_time = st.columns([2, 1])
+    
+    with col_search:
+        if company_map:
+            selected_label = st.selectbox(
+                "Select Company", 
+                options=list(company_map.keys()),
+                index=None,
+                placeholder="Search by Ticker or Name (e.g. NVDA)...",
+                label_visibility="visible"
+            )
+            target_company_key = company_map[selected_label] if selected_label else None
         else:
-            # 2. Process Annual Data
-            df_calc = process_financials(cf_annual, bs_annual)
-            
-            if df_calc is None or df_calc.empty:
-                 st.error("Data incomplete (Missing OCF or Assets fields in Yahoo Finance data).")
-            else:
-                # 3. TTM Calculation (The "Pro" Logic)
-                if include_ttm and not cf_q.empty and not bs_q.empty:
-                    try:
-                        last_annual_date = df_calc.index[-1]
-                        
-                        # Process Quarterly Data
-                        df_q_calc = process_financials(cf_q, bs_q)
-                        
-                        if df_q_calc is not None:
-                            last_quarter_date = df_q_calc.index[-1]
-                            
-                            # If we have newer quarterly data than annual
-                            if last_quarter_date > last_annual_date:
-                                # Get last 4 quarters
-                                last_4_q = df_q_calc.tail(4)
-                                if len(last_4_q) == 4:
-                                    # Sum FCF for TTM
-                                    fcf_ttm = last_4_q['FCF'].sum()
-                                    
-                                    # Take Latest Invested Capital (Snapshot)
-                                    ic_ttm = last_4_q['Invested_Capital'].iloc[-1]
-                                    
-                                    # Append TTM Row
-                                    ttm_row = pd.DataFrame({
-                                        'FCF': [fcf_ttm],
-                                        'Invested_Capital': [ic_ttm]
-                                    }, index=[last_quarter_date])
-                                    
-                                    df_calc = pd.concat([df_calc, ttm_row])
-                    except Exception as e:
-                        st.warning(f"Could not calculate TTM: {e}")
+            st.error("Database Connection Failed.")
+            target_company_key = None
 
-                # 4. Slice Data (Timeframe)
+    with col_time:
+        timeframe_label = st.selectbox(
+            "Timeframe",
+            options=[
+                "5 Years (Inc. YTD/TTM)", "Last 5 Fiscal Years",
+                "10 Years (Inc. YTD/TTM)", "Last 10 Fiscal Years",
+                "20 Years (Inc. YTD/TTM)", "Last 20 Fiscal Years"
+            ],
+            index=2
+        )
+
+    limit_map = {
+        "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
+        "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
+        "20 Years (Inc. YTD/TTM)": 20, "Last 20 Fiscal Years": 20
+    }
+    selected_limit = limit_map[timeframe_label]
+    include_ttm = "Inc." in timeframe_label
+
+st.write("") 
+
+# --- ANALYSIS EXECUTION ---
+if target_company_key:
+    company_name = selected_label.split('(')[0] if selected_label else target_company_key
+    
+    with st.spinner(f"Analyzing {company_name}..."):
+        cf_annual = fetch_data("cash-flow-statement", target_company_key, "annual")
+        bs_annual = fetch_data("balance-sheet", target_company_key, "annual")
+        cf_q = fetch_data("cash-flow-statement", target_company_key, "quarterly", limit=8)
+        bs_q = fetch_data("balance-sheet", target_company_key, "quarterly", limit=4)
+
+        if cf_annual.empty or bs_annual.empty:
+            st.warning(f"No annual data found for {company_name}.")
+        else:
+            try:
+                # --- DATA PROCESSING ---
+                def extract_series(cf, bs):
+                    ocf_raw = cf.get('cash_flow_statement_cash_from_operating_activities')
+                    capex_raw = cf.get('cash_flow_statement_capital_expenditure')
+                    if capex_raw is None: capex_raw = cf.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
+                    assets_raw = bs.get('balance_sheet_total_assets')
+                    curr_liab_raw = bs.get('balance_sheet_total_current_liabilities')
+                    
+                    if ocf_raw is None or assets_raw is None: return None
+                    
+                    ocf = pd.to_numeric(ocf_raw, errors='coerce').fillna(0)
+                    capex = pd.to_numeric(capex_raw, errors='coerce').fillna(0)
+                    assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
+                    curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0)
+                    
+                    fcf = ocf - capex.abs()
+                    ic = assets - curr_liab
+                    return pd.DataFrame({'FCF': fcf, 'Invested_Capital': ic}).dropna()
+
+                df_calc = extract_series(cf_annual, bs_annual)
+                
+                # --- TTM LOGIC ---
+                if include_ttm and not cf_q.empty and not bs_q.empty:
+                    last_annual = df_calc.index[-1]
+                    last_q = cf_q.index[-1]
+                    if last_q > last_annual:
+                        last_4 = cf_q.tail(4)
+                        if len(last_4) == 4:
+                            ocf_t = pd.to_numeric(last_4.get('cash_flow_statement_cash_from_operating_activities'), errors='coerce').fillna(0).sum()
+                            cpx_col = last_4.get('cash_flow_statement_capital_expenditure')
+                            if cpx_col is None: cpx_col = last_4.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
+                            cpx_t = pd.to_numeric(cpx_col, errors='coerce').fillna(0).sum()
+                            fcf_t = ocf_t - abs(cpx_t)
+                            
+                            lbs = bs_q.iloc[-1]
+                            ast_t = float(clean_value(lbs.get('balance_sheet_total_assets', 0)))
+                            liab_t = float(clean_value(lbs.get('balance_sheet_total_current_liabilities', 0)))
+                            ic_t = ast_t - liab_t
+                            
+                            ttm_row = pd.DataFrame({'FCF': [fcf_t], 'Invested_Capital': [ic_t]}, index=[last_q])
+                            df_calc = pd.concat([df_calc, ttm_row])
+
+                # --- SLICING ---
                 if len(df_calc) > selected_limit:
                     df_final = df_calc.tail(selected_limit)
                 else:
                     df_final = df_calc
 
                 if len(df_final) >= 2:
-                    # 5. Calculate Formulas
-                    start_date = df_final.index[0]
-                    end_date = df_final.index[-1]
+                    start_idx, end_idx = df_final.index[0], df_final.index[-1]
                     
                     # Labels
-                    s_yr = start_date.year
-                    e_yr = "TTM" if (include_ttm and end_date > cf_annual.index.max()) else end_date.year
-                    
+                    try: s_yr = str(start_idx.year)
+                    except: s_yr = str(start_idx)[:4]
+                    try:
+                        if include_ttm and end_idx > cf_annual.index[-1]: e_yr = "TTM"
+                        else: e_yr = str(end_idx.year)
+                    except: e_yr = str(end_idx)[:4]
+
+                    # Values
+                    FCF_start = df_final.loc[start_idx, 'FCF']
+                    FCF_end = df_final.loc[end_idx, 'FCF']
+                    IC_start = df_final.loc[start_idx, 'Invested_Capital']
+                    IC_end = df_final.loc[end_idx, 'Invested_Capital']
+
                     A1 = df_final['FCF'].sum()
-                    
-                    FCF_start = df_final.loc[start_date, 'FCF']
-                    FCF_end = df_final.loc[end_date, 'FCF']
                     B1 = FCF_end - FCF_start
-                    
-                    IC_start = df_final.loc[start_date, 'Invested_Capital']
-                    IC_end = df_final.loc[end_date, 'Invested_Capital']
                     A2 = IC_end - IC_start
                     
-                    # Ratios
                     roiic = B1 / A2 if A2 != 0 else 0
                     reinvest = A2 / A1 if A1 != 0 else 0
                     score = roiic * reinvest
                     
-                    # 6. Verdict Logic
+                    # --- DETERMINE VERDICT (Logic Below Table) ---
+                    # Defines the text, background color, and text color based on result
                     verdict_text = ""
                     bg_color = ""
                     text_color = ""
                     
                     if reinvest < 0.20:
                         verdict_text = "Cash Cow (Mature, low growth, distributes dividends)"
-                        bg_color = "#fef7e0"
-                        text_color = "#b06000"
+                        bg_color = "#fef7e0" # Light Yellow
+                        text_color = "#b06000" # Dark Gold
                     elif 0.80 <= reinvest <= 1.00:
                         verdict_text = "Aggressive Compounder"
-                        bg_color = "#e6f4ea"
-                        text_color = "#137333"
+                        bg_color = "#e6f4ea" # Light Green
+                        text_color = "#137333" # Google Green
                     elif reinvest > 1.00:
                         verdict_text = "Company is investing more than it earns (funding via debt or equity)"
-                        bg_color = "#fce8e6"
-                        text_color = "#c5221f"
+                        bg_color = "#fce8e6" # Light Red
+                        text_color = "#c5221f" # Google Red
                     else:
                         verdict_text = "Moderate Reinvestment (Standard Growth)"
-                        bg_color = "#e8f0fe"
-                        text_color = "#1967d2"
+                        bg_color = "#e8f0fe" # Light Blue
+                        text_color = "#1967d2" # Google Blue
 
                     # --- RENDER RESULTS ---
-                    st.markdown(f"<h3>{name} ({ticker_input}) Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
-
+                    st.markdown(f"<h3>{company_name} Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
+                    
+                    # 1. Metrics
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
                     m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
                     m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
-
-                    # Table
+                    
+                    # 2. Table (No label in row C2)
                     table_md = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
                     rows_data = [
                         {"N": f"Total FCF generated ({len(df_final)} yrs)", "V": format_currency(A1), "F": f"$\\sum FCF$", "M": "Accumulated FCF", "L": "A1"},
@@ -336,8 +357,8 @@ if st.button("Run Analysis", type="primary"):
                         table_md += f"| {r['N']} | {r['V']} | {r['F']} | **{r['M']}** | **{r['L']}** |\n"
 
                     st.markdown(table_md, unsafe_allow_html=True)
-
-                    # Verdict Banner
+                    
+                    # 3. VERDICT ROW (New Dynamic Component)
                     st.markdown(f"""
                     <div style="
                         background-color: {bg_color}; 
@@ -356,18 +377,25 @@ if st.button("Run Analysis", type="primary"):
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # Footer
+                    # 4. Details & Guide
                     st.write("")
                     with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
                         st.dataframe(df_final.style.format("${:,.0f}"), use_container_width=True)
-                    
+
                     with st.expander("📘 Reference: Formula Guide"):
                         st.markdown("""
                         **FCF (Free Cash Flow)** = Operating Cash Flow - CapEx  
                         **IC (Invested Capital)** = Total Assets - Current Liabilities  
                         **ROIIC** = $\Delta$ FCF / $\Delta$ IC (Target > 15%)  
                         **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)  
+                        
+                        **Reinvestment Interpretation:**
+                        * **< 20%:** Cash Cow (Mature, low growth, distributes dividends)
+                        * **80% - 100%:** Aggressive Compounder
+                        * **> 100%:** Company is investing more than it earns (funding via debt/equity)
                         """)
-                
+
                 else:
-                    st.warning("Insufficient historical data found.")
+                    st.error("Insufficient historical data for calculation.")
+            except Exception as e:
+                st.error(f"Error: {e}")
