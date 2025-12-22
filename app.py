@@ -316,6 +316,33 @@ if target_company_key:
                     with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
                         st.dataframe(df_final.style.format("${:,.0f}"))
 
+                    # --- GUIDE REFERENCE (ADDED BACK) ---
+                    with st.expander("📘 Reference: The Compounder Formula Guide"):
+                        st.markdown("""
+                        ### 1. The Objective
+                        The goal is to identify **"Compounders"**: companies that generate cash and reinvest it at high rates of return.
+                        
+                        ### 2. Core Definitions
+                        **A. Free Cash Flow (FCF)**
+                        $$FCF = \\text{Operating Cash Flow} - \\text{Capital Expenditures}$$
+
+                        **B. Invested Capital (Operating Approach)**
+                        $$Invested Capital = \\text{Total Assets} - \\text{Total Current Liabilities}$$
+
+                        ### 3. The Efficiency Ratios
+                        **Metric C1: Return on Incremental Invested Capital (ROIIC)**
+                        $$ROIIC = \\frac{\\Delta FCF}{\\Delta IC}$$
+                        *Target: >15-20% indicates a strong competitive advantage.*
+
+                        **Metric C2: Reinvestment Rate**
+                        $$\\text{Reinvestment Rate} = \\frac{\\Delta IC}{\\text{Accumulated FCF}}$$
+                        *Target: 80-100% indicates an aggressive compounder.*
+
+                        ### 4. The Final Compounder Score
+                        $$\\text{Score} = C1 \\times C2$$
+                        This score approximates the sustainable growth rate of the company's intrinsic value.
+                        """)
+
                 else:
                     st.warning("Insufficient data.")
             except Exception as e:
