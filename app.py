@@ -26,10 +26,8 @@ def normalize_exchange(exchange_name):
     into the prefixes required by Fiscal.ai (e.g., 'NASDAQ').
     """
     if not exchange_name: return "UNKNOWN"
-    
     name = str(exchange_name).upper()
     
-    # Map common names to prefixes
     if "NASDAQ" in name: return "NASDAQ"
     if "NEW YORK" in name or "NYSE" in name: return "NYSE"
     if "LONDON" in name or "LSE" in name: return "LSE"
@@ -37,7 +35,6 @@ def normalize_exchange(exchange_name):
     if "AMEX" in name: return "AMEX"
     if "OTC" in name: return "OTC"
     
-    # Fallback: use the first word if it looks like a code (e.g. 'JKT' -> 'JKT')
     return name.split(' ')[0]
 
 # --- CACHED DATA LOADING ---
@@ -62,22 +59,12 @@ def get_company_map():
         for row in rows:
             ticker = row.get('ticker')
             name = row.get('companyName', row.get('name', ticker))
-            
-            # --- CRITICAL FIX: Get Exchange Name ---
-            # We prioritize 'exchangeName' based on your snippet
             raw_exchange = row.get('exchangeName', row.get('exchange', 'UNKNOWN'))
-            
-            # Convert 'Nasdaq' -> 'NASDAQ'
             exchange_prefix = normalize_exchange(raw_exchange)
             
             if ticker and exchange_prefix != "UNKNOWN":
-                # Construct the valid key for the API
                 full_key = f"{exchange_prefix}_{ticker}"
-                
-                # Create a clean label for the dropdown
-                # Label: "NVIDIA Corporation (NVDA)"
                 label = f"{name} ({ticker})"
-                
                 company_map[label] = full_key
                 
         return company_map
@@ -115,7 +102,6 @@ def fetch_and_process(endpoint_type, company_key):
             
         df = pd.DataFrame(clean_rows)
         
-        # Date Logic
         date_col = None
         if 'reportDate' in df.columns: date_col = 'reportDate'
         elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
@@ -128,7 +114,7 @@ def fetch_and_process(endpoint_type, company_key):
              df = df.sort_values(by='fiscalYear', ascending=True).set_index('fiscalYear')
             
         return df
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 # --- MAIN LAYOUT ---
@@ -140,15 +126,12 @@ with st.spinner("Syncing company database..."):
 # 2. Search Bar
 st.write("") 
 if company_map:
-    # User selects "NVIDIA Corporation (NVDA)"
     selected_label = st.selectbox(
         "🔎 **Search Company** (Type Ticker or Name)", 
         options=list(company_map.keys()),
         index=None,
         placeholder="e.g. NVDA, MSFT, Apple..."
     )
-    
-    # We automatically grab "NASDAQ_NVDA"
     target_company_key = company_map[selected_label] if selected_label else None
 else:
     st.error("Could not connect to company database.")
@@ -158,7 +141,6 @@ else:
 st.divider()
 
 if target_company_key:
-    # We display the key we found, so you know it worked
     st.info(f"⚡ Analyzing **{target_company_key}** ...")
     
     with st.spinner("Fetching financial reports..."):
@@ -218,8 +200,47 @@ if target_company_key:
                         elif score > 0.10: st.warning("⚠️ **Moderate Compounder**")
                         else: st.error("❌ **Low Efficiency**")
                         
+                        # RAW DATA EXPANDER
                         with st.expander("View Calculation Data"):
                             st.dataframe(df_calc.style.format("${:,.0f}"))
+                            
+                        # --- NEW GUIDE EXPANDER ---
+                        with st.expander("📘 Reference: The Compounder Formula Guide"):
+                            st.markdown("""
+                            ### 1. The Objective
+                            The goal is to identify **"Compounders"**: companies that generate cash and reinvest it at high rates of return.
+                            This combination is the most powerful engine for creating long-term shareholder value.
+
+                            ### 2. Core Definitions
+                            **A. Free Cash Flow (FCF)**
+                            Actual cash remaining after maintenance and development of assets.
+                            $$FCF = \\text{Operating Cash Flow} - \\text{Capital Expenditures}$$
+
+                            **B. Invested Capital (Operating Approach)**
+                            Total assets actually used in business operations.
+                            $$Invested Capital = \\text{Total Assets} - \\text{Total Current Liabilities}$$
+
+                            ### 3. The Calculation Process
+                            We analyze a long period (typically 10 years) to smooth out volatility.
+                            * **A1 (Accumulated FCF):** Sum of all FCF generated. (Total "fuel" produced).
+                            * **B1 (Delta FCF):** $FCF_{end} - FCF_{start}$ (Growth in cash flow stream).
+                            * **A2 (Delta IC):** $IC_{end} - IC_{start}$ (New capital added to balance sheet).
+
+                            ### 4. The Efficiency Ratios
+                            **Metric C1: Return on Incremental Invested Capital (ROIIC)**
+                            $$ROIIC = \\frac{B1 \\ (\\Delta FCF)}{A2 \\ (\\Delta IC)}$$
+                            *Target: >15-20% indicates a strong competitive advantage (Moat).*
+
+                            **Metric C2: Reinvestment Rate**
+                            $$\\text{Reinvestment Rate} = \\frac{A2 \\ (\\Delta IC)}{A1 \\ (\\text{Accumulated FCF})}$$
+                            *Target: 80-100% indicates an aggressive compounder.*
+                            *Interpretation: <20% is a Cash Cow; >100% is funding growth via debt/equity.*
+
+                            ### 5. The Final Compounder Score
+                            $$\\text{Score} = C1 \\times C2$$
+                            This score approximates the sustainable growth rate of the company's intrinsic value.
+                            """)
+
                     else:
                         st.warning("Insufficient historical data (Need 2+ years).")
                 else:
