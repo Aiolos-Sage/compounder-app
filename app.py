@@ -6,7 +6,7 @@ import numpy as np
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Compounder Formula", page_icon="📈", layout="wide")
 
-st.title("📈 Compounder Dashboard (Fiscal.ai)")
+st.title("📈 Compounder Dashboard")
 st.markdown("Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.")
 
 # --- SECURE CONFIGURATION ---
@@ -19,16 +19,15 @@ except (FileNotFoundError, KeyError):
 BASE_URL = "https://api.fiscal.ai/v1/company/financials"
 LIST_URL = "https://api.fiscal.ai/v2/companies-list"
 
-# --- CACHED DATA LOADING (SEARCH FUNCTION) ---
-@st.cache_data(ttl=3600) # Cache for 1 hour to prevent constant API hits
+# --- CACHED DATA LOADING ---
+@st.cache_data(ttl=3600)
 def get_company_map():
     """
-    Fetches the list of companies to populate the search bar.
+    Fetches the company list (Name + Ticker) for the search bar.
     """
     headers = {"X-API-KEY": API_KEY}
-    # Fetching 3000 should cover most major global stocks. 
-    # You can increase pageSize if needed, but it may slow down loading.
-    params = {"pageNumber": 1, "pageSize": 3000, "apiKey": API_KEY}
+    # Increased to 5000 to capture more companies
+    params = {"pageNumber": 1, "pageSize": 5000, "apiKey": API_KEY}
     
     try:
         response = requests.get(LIST_URL, headers=headers, params=params)
@@ -38,20 +37,18 @@ def get_company_map():
         data = response.json()
         rows = data.get('data', data) if isinstance(data, dict) else data
         
-        # Create a dictionary: "Name (Ticker)" -> "EXCHANGE_TICKER"
-        # Example: "Amazon.com Inc (AMZN)" -> "NASDAQ_AMZN"
         company_map = {}
         for row in rows:
-            # Adjust these keys based on the actual API response for company list
             ticker = row.get('ticker', 'UNKNOWN')
             exchange = row.get('exchange', 'UNKNOWN')
             name = row.get('companyName', row.get('name', ticker))
             
-            # Construct the ID needed for the API
+            # Key for API calls
             full_key = f"{exchange}_{ticker}"
             
-            # Construct the Display Label
-            display_label = f"{ticker} | {name} ({exchange})"
+            # Label for the Dropdown (User Friendly)
+            # Format: "Amazon.com Inc (AMZN) - NASDAQ"
+            display_label = f"{name} ({ticker}) - {exchange}"
             
             company_map[display_label] = full_key
             
@@ -59,29 +56,7 @@ def get_company_map():
     except Exception:
         return {}
 
-# --- SIDEBAR SEARCH ---
-with st.sidebar:
-    st.header("🔎 Stock Search")
-    company_map = get_company_map()
-    
-    if company_map:
-        selected_label = st.selectbox(
-            "Search for a company:", 
-            options=list(company_map.keys()),
-            index=None,
-            placeholder="Type Ticker or Name (e.g. Apple)..."
-        )
-        
-        # Get the API Key (e.g. NASDAQ_AAPL) from the selection
-        if selected_label:
-            target_company_key = company_map[selected_label]
-        else:
-            target_company_key = None
-    else:
-        st.warning("Could not load company list. Please check API Key.")
-        target_company_key = st.text_input("Enter Company Key manually:", "NASDAQ_AMZN")
-
-# --- HELPER FUNCTIONS (DATA PROCESSING) ---
+# --- HELPER FUNCTIONS ---
 def clean_value(val):
     if isinstance(val, dict):
         return val.get('value', val.get('raw', val.get('amount', 0)))
@@ -113,7 +88,7 @@ def fetch_and_process(endpoint_type, company_key):
             
         df = pd.DataFrame(clean_rows)
         
-        # Date Handling
+        # Date Logic
         date_col = None
         if 'reportDate' in df.columns: date_col = 'reportDate'
         elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
@@ -130,21 +105,47 @@ def fetch_and_process(endpoint_type, company_key):
         st.error(f"Connection Error: {e}")
         return pd.DataFrame()
 
-# --- MAIN DASHBOARD LOGIC ---
-if target_company_key:
-    st.subheader(f"Analysis: {target_company_key}")
+# --- MAIN PAGE LAYOUT ---
+
+# 1. Load Data
+with st.spinner("Loading company database..."):
+    company_map = get_company_map()
+
+# 2. Large Search Bar (Main Body)
+st.write("") # Spacer
+if company_map:
+    selected_label = st.selectbox(
+        "🔎 **Search for a Company** (Type name or ticker)", 
+        options=list(company_map.keys()),
+        index=None, # Defaults to empty
+        placeholder="Start typing... e.g. Amazon, Apple, MSFT"
+    )
     
-    if st.button("Run Analysis", type="primary"):
-        with st.spinner(f"Fetching data for {target_company_key}..."):
+    # Get the ID (e.g. NASDAQ_AMZN)
+    target_company_key = company_map[selected_label] if selected_label else None
+else:
+    st.warning("⚠️ Could not load company list. Please check API connectivity.")
+    target_company_key = st.text_input("Enter Company Key manually:", "NASDAQ_AMZN")
+
+
+# 3. Analysis Section
+st.divider()
+
+if target_company_key:
+    # Run button is now centered/prominent under the search
+    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+        st.subheader(f"Analysis: {selected_label if selected_label else target_company_key}")
+        
+        with st.spinner(f"Crunching numbers for {target_company_key}..."):
             
             cf_df = fetch_and_process("cash-flow-statement", target_company_key)
             bs_df = fetch_and_process("balance-sheet", target_company_key)
 
             if cf_df.empty or bs_df.empty:
-                st.error("No financial data found for this company.")
+                st.error("No financial data returned for this company.")
             else:
                 try:
-                    # Extract Columns
+                    # Extract
                     ocf_raw = cf_df.get('cash_flow_statement_cash_from_operating_activities')
                     capex_raw = cf_df.get('cash_flow_statement_capital_expenditure')
                     if capex_raw is None:
@@ -154,17 +155,15 @@ if target_company_key:
                     curr_liab_raw = bs_df.get('balance_sheet_total_current_liabilities')
 
                     if ocf_raw is not None and assets_raw is not None:
-                        # Clean Data
+                        # Clean
                         ocf = pd.to_numeric(ocf_raw, errors='coerce').fillna(0)
                         capex = pd.to_numeric(capex_raw, errors='coerce').fillna(0) if capex_raw is not None else 0
                         assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
                         curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0) if curr_liab_raw is not None else 0
 
-                        # Calculate
-                        # FCF = OCF - |CapEx|
+                        # Calc
                         if isinstance(capex, (int, float)): fcf_series = ocf - abs(capex)
                         else: fcf_series = ocf - capex.abs()
-
                         ic_series = assets - curr_liab
                         
                         df_calc = pd.DataFrame({'FCF': fcf_series, 'Invested_Capital': ic_series}).dropna()
@@ -172,12 +171,8 @@ if target_company_key:
                         if len(df_calc) >= 2:
                             # Metrics
                             start_idx, end_idx = df_calc.index[0], df_calc.index[-1]
-                            
-                            try:
-                                s_year = start_idx.year
-                                e_year = end_idx.year
-                            except AttributeError:
-                                s_year, e_year = start_idx, end_idx
+                            try: s_year, e_year = start_idx.year, end_idx.year
+                            except AttributeError: s_year, e_year = start_idx, end_idx
 
                             A1 = df_calc['FCF'].sum()
                             B1 = df_calc.loc[end_idx, 'FCF'] - df_calc.loc[start_idx, 'FCF']
@@ -188,25 +183,24 @@ if target_company_key:
                             score = roiic * reinvest
                             
                             # Display
-                            st.divider()
                             st.markdown(f"**Period Analyzed:** {s_year} - {e_year}")
                             
                             c1, c2, c3 = st.columns(3)
-                            c1.metric("🏆 Compounder Score", f"{score:.1%}")
-                            c2.metric("Efficiency (ROIIC)", f"{roiic:.1%}")
-                            c3.metric("Reinvestment Rate", f"{reinvest:.1%}")
+                            c1.metric("Compounder Score", f"{score:.1%}", help="ROIIC x Reinvestment Rate")
+                            c2.metric("ROIIC", f"{roiic:.1%}", help="Return on Incremental Invested Capital")
+                            c3.metric("Reinvestment Rate", f"{reinvest:.1%}", help="% of Cash Flow reinvested")
                             
                             if score > 0.15: st.success("✅ **High Probability Compounder**")
                             elif score > 0.10: st.warning("⚠️ **Moderate Compounder**")
                             else: st.error("❌ **Low Efficiency**")
                             
-                            with st.expander("Show Calculation Data"):
+                            with st.expander("View Calculation Data"):
                                 st.dataframe(df_calc.style.format("${:,.0f}"))
                         else:
-                            st.warning("Insufficient historical data (Need at least 2 years).")
+                            st.warning("Insufficient historical data (Need 2+ years).")
                     else:
-                        st.error("Required data columns (OCF/Assets) missing from API response.")
+                        st.error("Required data columns missing.")
                 except Exception as e:
                     st.error(f"Calculation Error: {e}")
 else:
-    st.info("👈 Please select a company from the sidebar to begin.")
+    st.info("👆 Use the search bar above to select a company.")
