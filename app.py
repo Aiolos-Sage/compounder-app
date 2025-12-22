@@ -79,8 +79,16 @@ def clean_value(val):
 
 def fetch_and_process(endpoint_type, company_key):
     url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/3.0"}
-    params = {"companyKey": company_key, "periodType": "annual", "currency": "USD", "apiKey": API_KEY}
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/4.0"}
+    
+    # We fetch ALL available data ('limit' not set or set high) 
+    # and then filter it in Python based on the user's dropdown.
+    params = {
+        "companyKey": company_key, 
+        "periodType": "annual", 
+        "currency": "USD", 
+        "apiKey": API_KEY
+    }
     
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -125,23 +133,55 @@ with st.spinner("Syncing company database..."):
 
 # 2. Search Bar
 st.write("") 
-if company_map:
-    selected_label = st.selectbox(
-        "🔎 **Search Company** (Type Ticker or Name)", 
-        options=list(company_map.keys()),
-        index=None,
-        placeholder="e.g. NVDA, MSFT, Apple..."
-    )
-    target_company_key = company_map[selected_label] if selected_label else None
-else:
-    st.error("Could not connect to company database.")
-    target_company_key = None
+col_search, col_time = st.columns([3, 1])
 
-# 3. Auto-Run Analysis
+with col_search:
+    if company_map:
+        selected_label = st.selectbox(
+            "🔎 **Search Company** (Type Ticker or Name)", 
+            options=list(company_map.keys()),
+            index=None,
+            placeholder="e.g. NVDA, MSFT, Apple..."
+        )
+        target_company_key = company_map[selected_label] if selected_label else None
+    else:
+        st.error("Could not connect to company database.")
+        target_company_key = None
+
+# 3. Timeframe Selector
+with col_time:
+    timeframe_label = st.selectbox(
+        "⏱️ **Select Timeframe**",
+        options=[
+            "5 Years (Inc. YTD)",
+            "Last 5 Fiscal Years",
+            "10 Years (Inc. YTD)",
+            "Last 10 Fiscal Years",
+            "20 Years (Inc. YTD)",
+            "Last 20 Fiscal Years"
+        ],
+        index=2 # Default to 10 Years (Inc. YTD)
+    )
+
+# Map labels to integer limits
+# Note: Since the API returns 'Annual' data, YTD/Fiscal Year logic 
+# is handled by taking the most recent N rows.
+limit_map = {
+    "5 Years (Inc. YTD)": 5,
+    "Last 5 Fiscal Years": 5,
+    "10 Years (Inc. YTD)": 10,
+    "Last 10 Fiscal Years": 10,
+    "20 Years (Inc. YTD)": 20,
+    "Last 20 Fiscal Years": 20
+}
+selected_limit = limit_map[timeframe_label]
+
+
+# 4. Auto-Run Analysis
 st.divider()
 
 if target_company_key:
-    st.info(f"⚡ Analyzing **{target_company_key}** ...")
+    st.info(f"⚡ Analyzing **{target_company_key}** over {timeframe_label} ...")
     
     with st.spinner("Fetching financial reports..."):
         cf_df = fetch_and_process("cash-flow-statement", target_company_key)
@@ -172,7 +212,15 @@ if target_company_key:
                     else: fcf_series = ocf - capex.abs()
                     ic_series = assets - curr_liab
                     
-                    df_calc = pd.DataFrame({'FCF': fcf_series, 'Invested_Capital': ic_series}).dropna()
+                    # Create Master DataFrame
+                    df_full = pd.DataFrame({'FCF': fcf_series, 'Invested_Capital': ic_series}).dropna()
+
+                    # --- APPLY TIMEFRAME FILTER ---
+                    # We take the last N rows based on the user's selection
+                    if len(df_full) > selected_limit:
+                        df_calc = df_full.tail(selected_limit)
+                    else:
+                        df_calc = df_full # Use what we have if less than limit
 
                     if len(df_calc) >= 2:
                         # Metrics
@@ -201,48 +249,37 @@ if target_company_key:
                         else: st.error("❌ **Low Efficiency**")
                         
                         # RAW DATA EXPANDER
-                        with st.expander("View Calculation Data"):
+                        with st.expander(f"View Data ({timeframe_label})"):
                             st.dataframe(df_calc.style.format("${:,.0f}"))
                             
-                        # --- NEW GUIDE EXPANDER ---
+                        # GUIDE EXPANDER
                         with st.expander("📘 Reference: The Compounder Formula Guide"):
                             st.markdown("""
                             ### 1. The Objective
                             The goal is to identify **"Compounders"**: companies that generate cash and reinvest it at high rates of return.
-                            This combination is the most powerful engine for creating long-term shareholder value.
 
                             ### 2. Core Definitions
                             **A. Free Cash Flow (FCF)**
-                            Actual cash remaining after maintenance and development of assets.
                             $$FCF = \\text{Operating Cash Flow} - \\text{Capital Expenditures}$$
 
                             **B. Invested Capital (Operating Approach)**
-                            Total assets actually used in business operations.
                             $$Invested Capital = \\text{Total Assets} - \\text{Total Current Liabilities}$$
 
-                            ### 3. The Calculation Process
-                            We analyze a long period (typically 10 years) to smooth out volatility.
-                            * **A1 (Accumulated FCF):** Sum of all FCF generated. (Total "fuel" produced).
-                            * **B1 (Delta FCF):** $FCF_{end} - FCF_{start}$ (Growth in cash flow stream).
-                            * **A2 (Delta IC):** $IC_{end} - IC_{start}$ (New capital added to balance sheet).
-
-                            ### 4. The Efficiency Ratios
+                            ### 3. The Efficiency Ratios
                             **Metric C1: Return on Incremental Invested Capital (ROIIC)**
-                            $$ROIIC = \\frac{B1 \\ (\\Delta FCF)}{A2 \\ (\\Delta IC)}$$
-                            *Target: >15-20% indicates a strong competitive advantage (Moat).*
+                            $$ROIIC = \\frac{\\Delta FCF}{\\Delta IC}$$
+                            *Target: >15-20%*
 
                             **Metric C2: Reinvestment Rate**
-                            $$\\text{Reinvestment Rate} = \\frac{A2 \\ (\\Delta IC)}{A1 \\ (\\text{Accumulated FCF})}$$
-                            *Target: 80-100% indicates an aggressive compounder.*
-                            *Interpretation: <20% is a Cash Cow; >100% is funding growth via debt/equity.*
+                            $$\\text{Reinvestment Rate} = \\frac{\\Delta IC}{\\text{Accumulated FCF}}$$
+                            *Target: 80-100%*
 
-                            ### 5. The Final Compounder Score
+                            ### 4. The Final Compounder Score
                             $$\\text{Score} = C1 \\times C2$$
-                            This score approximates the sustainable growth rate of the company's intrinsic value.
                             """)
 
                     else:
-                        st.warning("Insufficient historical data (Need 2+ years).")
+                        st.warning(f"Not enough data for the selected timeframe ({selected_limit} years requested, {len(df_full)} found).")
                 else:
                     st.error("Required data columns missing.")
             except Exception as e:
