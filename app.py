@@ -4,127 +4,174 @@ import pandas as pd
 
 # --- CONFIGURATION ---
 API_KEY = "56753137-4528-4f1e-82a7-160461b4f57e"
-BASE_URL = "https://api.fiscal.ai/api/v1"
+BASE_URL = "https://api.fiscal.ai/v1/company/financials"
 
-# --- PAGE SETUP ---
-st.set_page_config(page_title="Compounder Formula", page_icon="📊")
+st.set_page_config(page_title="Compounder Formula", page_icon="📈")
 
-st.title("📊 Compounder Formula Dashboard")
-st.markdown("Calculate **ROIIC** and **Reinvestment Rates** to identify high-quality compounders.")
+st.title("📈 Compounder Dashboard (Fiscal.ai)")
+st.markdown("""
+Identify high-quality compounders using **ROIIC** and **Reinvestment Rates**.
+""")
 
-# --- INPUT ---
-ticker_symbol = st.text_input("Enter Ticker Symbol", value="APG").upper()
+# --- INPUT SECTION ---
+# Fiscal.ai requires EXCHANGE_TICKER format. We give examples to the user.
+ticker_input = st.text_input(
+    "Enter Company Key (Format: EXCHANGE_TICKER)", 
+    value="NASDAQ_MSFT",
+    help="Examples: NASDAQ_MSFT, NYSE_APG, LSE_AHT"
+).strip().upper()
 
-# --- LOGIC ---
-class CompounderCalculator:
-    def __init__(self, ticker):
-        self.ticker = ticker
-        self.headers = {"X-API-KEY": API_KEY}
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+# --- HELPER FUNCTIONS ---
+def find_col(df, candidates):
+    """
+    Helper to find the correct column name from 'As Reported' data,
+    since API keys might vary slightly (e.g. 'totalAssets' vs 'TotalAssets').
+    """
+    # Create a lower-case map of existing columns
+    col_map = {c.lower(): c for c in df.columns}
+    
+    for cand in candidates:
+        if cand.lower() in col_map:
+            return df[col_map[cand.lower()]]
+    return None
 
-    def get_financials(self, statement_type):
-        endpoint = f"{BASE_URL}/financials/standardized"
-        params = {
-            "ticker": self.ticker,
-            "statement": statement_type,
-            "period": "annual",
-            "limit": 10
-        }
-        try:
-            response = self.session.get(endpoint, params=params)
-            if response.status_code == 403:
-                st.error("API Error: Invalid Key or Access Denied.")
-                return pd.DataFrame()
-            response.raise_for_status()
-            data = response.json()
-            df = pd.DataFrame(data['data']) if 'data' in data else pd.DataFrame(data)
-            if not df.empty:
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.sort_values(by='date', ascending=True).set_index('date')
-            return df
-        except Exception as e:
-            st.error(f"Error fetching {statement_type}: {e}")
+def fetch_fiscal_data(endpoint_type, company_key):
+    """
+    Fetches data from the specific Fiscal.ai endpoints provided.
+    """
+    # Construct URL based on the user's provided endpoints
+    url = f"{BASE_URL}/{endpoint_type}/as-reported"
+    
+    params = {
+        "companyKey": company_key,
+        "periodType": "annual",
+        "apiKey": API_KEY
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Fiscal.ai usually returns a dict or list. We standardize to DataFrame.
+        # We look for a 'data' key or assume the list is the root.
+        rows = data.get('data', data) if isinstance(data, dict) else data
+        
+        if not rows:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(rows)
+        
+        # Standardize Date Index
+        if 'fiscalDate' in df.columns:
+            df['date'] = pd.to_datetime(df['fiscalDate'])
+        elif 'date' in df.columns:
+             df['date'] = pd.to_datetime(df['date'])
+        else:
+            # Fallback if no date found, create a dummy index (risky but prevents crash)
             return pd.DataFrame()
 
-    def run(self):
-        with st.spinner(f"Fetching data for {self.ticker}..."):
-            cf_df = self.get_financials("cash_flow")
-            bs_df = self.get_financials("balance_sheet")
+        df = df.sort_values(by='date', ascending=True).set_index('date')
+        return df
 
-        if cf_df.empty or bs_df.empty:
-            st.warning("Insufficient data found for this ticker.")
-            return
+    except requests.exceptions.RequestException as e:
+        st.error(f"API Error ({endpoint_type}): {e}")
+        return pd.DataFrame()
 
-        # Data Processing
-        try:
-            ocf = cf_df.get('operating_cash_flow')
-            capex = cf_df.get('capital_expenditure')
-            total_assets = bs_df.get('total_assets')
-            current_liabilities = bs_df.get('total_current_liabilities')
-            
-            common_dates = ocf.index.intersection(total_assets.index)
-            
-            # Calculations
-            fcf_series = ocf.loc[common_dates] + capex.loc[common_dates]
-            ic_series = total_assets.loc[common_dates] - current_liabilities.loc[common_dates]
-            
-            df = pd.DataFrame({'FCF': fcf_series, 'Invested_Capital': ic_series}).dropna()
-
-            if len(df) < 2:
-                st.error("Need at least 2 years of data to calculate growth.")
-                return
-            
-            # Formula Variables
-            start_date, end_date = df.index[0], df.index[-1]
-            fcf_start, fcf_end = df.loc[start_date, 'FCF'], df.loc[end_date, 'FCF']
-            ic_start, ic_end = df.loc[start_date, 'Invested_Capital'], df.loc[end_date, 'Invested_Capital']
-            
-            A1_accumulated_fcf = df['FCF'].sum()
-            B1_increase_fcf = fcf_end - fcf_start
-            A2_increase_ic = ic_end - ic_start
-            
-            # Ratios
-            C1_roiic = 0 if A2_increase_ic == 0 else B1_increase_fcf / A2_increase_ic
-            C2_reinvestment = 0 if A1_accumulated_fcf == 0 else A2_increase_ic / A1_accumulated_fcf
-            score = C1_roiic * C2_reinvestment
-
-            # --- DISPLAY RESULTS ---
-            st.divider()
-            
-            # Scorecard
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Compounder Score", f"{score:.1%}")
-            col2.metric("ROIIC (Efficiency)", f"{C1_roiic:.1%}")
-            col3.metric("Reinvestment Rate", f"{C2_reinvestment:.1%}")
-
-            # Verdict
-            if score > 0.15:
-                st.success("✅ VERDICT: High Probability Compounder")
-            elif score > 0.10:
-                st.warning("⚠️ VERDICT: Moderate Compounder")
-            else:
-                st.error("❌ VERDICT: Low Efficiency / Capital Heavy")
-
-            # Detailed Data
-            st.subheader("Data Breakdown")
-            st.write(f"**Period Analyzed:** {start_date.year} - {end_date.year}")
-            
-            data_col1, data_col2 = st.columns(2)
-            with data_col1:
-                st.write("#### Growth Engine")
-                st.write(f"**[B1] New FCF:** ${B1_increase_fcf/1e6:,.1f}M")
-                st.write(f"**[A2] New Capital:** ${A2_increase_ic/1e6:,.1f}M")
-            
-            with data_col2:
-                st.write("#### Base Metrics")
-                st.write(f"**Start FCF:** ${fcf_start/1e6:,.1f}M")
-                st.write(f"**End FCF:** ${fcf_end/1e6:,.1f}M")
-
-        except Exception as e:
-            st.error(f"Calculation Error: {e}")
-
-# --- EXECUTION ---
+# --- MAIN LOGIC ---
 if st.button("Run Analysis"):
-    calc = CompounderCalculator(ticker_symbol)
-    calc.run()
+    if "_" not in ticker_input:
+        st.warning("⚠️ Please use the format **EXCHANGE_TICKER** (e.g., NYSE_APG).")
+    else:
+        with st.spinner(f"Fetching Fiscal.ai reports for {ticker_input}..."):
+            
+            # 1. Fetch needed reports
+            # We need Cash Flow (for FCF) and Balance Sheet (for Invested Capital)
+            cf_df = fetch_fiscal_data("cash-flow-statement", ticker_input)
+            bs_df = fetch_fiscal_data("balance-sheet", ticker_input)
+
+            if cf_df.empty or bs_df.empty:
+                st.error("No data found. Check the ticker format (e.g. NASDAQ_MSFT) and try again.")
+            else:
+                # 2. Extract Columns (Smart Search)
+                # We search for common variations of the column names to be safe
+                
+                # Cash Flow Items
+                ocf = find_col(cf_df, ['operatingCashFlow', 'netCashProvidedByOperatingActivities', 'NetCashFromOperatingActivities'])
+                capex = find_col(cf_df, ['capitalExpenditure', 'capex', 'paymentsForCapitalExpenditure'])
+                
+                # Balance Sheet Items
+                assets = find_col(bs_df, ['totalAssets', 'assets'])
+                curr_liab = find_col(bs_df, ['totalCurrentLiabilities', 'currentLiabilities'])
+
+                # Validation
+                missing = []
+                if ocf is None: missing.append("Operating Cash Flow")
+                if assets is None: missing.append("Total Assets")
+                
+                if missing:
+                    st.error(f"Could not find these columns in the API response: {', '.join(missing)}")
+                    st.write("Available CF Cols:", cf_df.columns.tolist())
+                    st.write("Available BS Cols:", bs_df.columns.tolist())
+                else:
+                    # Fill missing optional columns with 0 if necessary
+                    capex = capex if capex is not None else 0
+                    curr_liab = curr_liab if curr_liab is not None else 0
+
+                    # 3. Calculate Formula
+                    # FCF = OCF + CapEx (CapEx is usually negative in API, so we ADD. If it's positive, subtract.)
+                    # Logic check: If CapEx is positive numbers, subtract. If negative, add. 
+                    # We assume standard accounting (negative outflows).
+                    fcf_series = ocf + capex
+                    
+                    # IC = Total Assets - Current Liabilities
+                    ic_series = assets - curr_liab
+                    
+                    # Merge
+                    df_calc = pd.DataFrame({
+                        'FCF': fcf_series, 
+                        'Invested_Capital': ic_series
+                    }).dropna()
+
+                    if len(df_calc) < 2:
+                        st.error("Insufficient historical data points (need at least 2 years).")
+                    else:
+                        # 4. Compute Metrics
+                        start_date = df_calc.index[0]
+                        end_date = df_calc.index[-1]
+                        
+                        fcf_start = df_calc.loc[start_date, 'FCF']
+                        fcf_end = df_calc.loc[end_date, 'FCF']
+                        ic_start = df_calc.loc[start_date, 'Invested_Capital']
+                        ic_end = df_calc.loc[end_date, 'Invested_Capital']
+
+                        # Variables
+                        A1_accumulated_fcf = df_calc['FCF'].sum()
+                        B1_increase_fcf = fcf_end - fcf_start
+                        A2_increase_ic = ic_end - ic_start
+
+                        # Ratios
+                        C1_roiic = B1_increase_fcf / A2_increase_ic if A2_increase_ic != 0 else 0
+                        C2_reinvestment = A2_increase_ic / A1_accumulated_fcf if A1_accumulated_fcf != 0 else 0
+                        score = C1_roiic * C2_reinvestment
+
+                        # 5. Dashboard Output
+                        st.divider()
+                        st.subheader(f"Results for {ticker_input}")
+                        st.caption(f"Period: {start_date.year} - {end_date.year}")
+
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Compounder Score", f"{score:.1%}")
+                        col2.metric("ROIIC (Efficiency)", f"{C1_roiic:.1%}")
+                        col3.metric("Reinvestment Rate", f"{C2_reinvestment:.1%}")
+
+                        if score > 0.15:
+                            st.success("✅ **High Probability Compounder**")
+                        elif score > 0.10:
+                            st.warning("⚠️ **Moderate Compounder**")
+                        else:
+                            st.error("❌ **Low Efficiency / Capital Heavy**")
+
+                        # Show Raw Data for verification
+                        with st.expander("View Underlying Data"):
+                            st.dataframe(df_calc.style.format("{:,.0f}"))
