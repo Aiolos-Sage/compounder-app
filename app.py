@@ -226,14 +226,10 @@ if target_company_key:
                         # Determine if end is TTM
                         if include_ttm and end_idx > cf_annual.index[-1]:
                             e_yr = "TTM"
-                            e_yr_sub = "TTM" # For formula subscript
                         else:
                             e_yr = str(end_idx.year)
-                            e_yr_sub = str(end_idx.year)[-2:] # '24'
-                            s_yr_sub = s_yr[-2:] # '15'
                     except:
                         e_yr = str(end_idx)[:4]
-                        e_yr_sub = "End"
 
                     # --- CALCULATIONS ---
                     FCF_start = df_final.loc[start_idx, 'FCF']
@@ -253,8 +249,6 @@ if target_company_key:
                     st.caption("(Values in Billions USD)")
 
                     # --- BUILD THE RESULT TABLE ---
-                    # Columns: Notes | Value | Formula | Metric | Label
-                    
                     # Row 1: A1
                     row_A1 = {
                         "Metric": "Accumulated Free Cash Flow",
@@ -310,25 +304,13 @@ if target_company_key:
                     }
 
                     results_data = [row_A1, row_B1, row_A2, row_C1, row_C2, row_Res]
-                    results_df = pd.DataFrame(results_data)
 
                     # --- RENDER TABLE WITH MARKDOWN (For Math) ---
-                    # Streamlit dataframe doesn't render latex in cells easily, so we build a clean Markdown table.
-                    
                     md_table = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
                     for row in results_data:
                         md_table += f"| {row['Notes']} | {row['Value']} | {row['Formula']} | **{row['Metric']}** | **{row['Label']}** |\n"
                     
                     st.markdown(md_table)
-                    
-                    # --- EXPORT BUTTON ---
-                    csv = results_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="⤓ Export to Sheets (CSV)",
-                        data=csv,
-                        file_name=f"{target_company_key}_compounder_analysis.csv",
-                        mime="text/csv",
-                    )
                     
                     # --- RAW DATA ---
                     with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
