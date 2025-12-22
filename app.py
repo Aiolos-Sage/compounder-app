@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import numpy as np
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Compounder Formula", page_icon="📈")
@@ -27,9 +28,19 @@ ticker_input = st.text_input(
 ).strip().upper()
 
 # --- HELPER FUNCTIONS ---
+def clean_value(val):
+    """
+    Extracts the numeric value if the API returns a dictionary (e.g. {'value': 100}).
+    Otherwise returns the value as is.
+    """
+    if isinstance(val, dict):
+        # Try common keys for values
+        return val.get('value', val.get('raw', val.get('amount', 0)))
+    return val
+
 def fetch_and_process(endpoint_type, company_key):
     """
-    Fetches data, unpacks 'metricsValues', and standardizes dates.
+    Fetches data, unpacks 'metricsValues', and cleans nested dictionary values.
     """
     url = f"{BASE_URL}/{endpoint_type}/standardized"
     
@@ -58,13 +69,17 @@ def fetch_and_process(endpoint_type, company_key):
         rows = data.get('data', data) if isinstance(data, dict) else data
         if not rows: return pd.DataFrame()
             
-        # 2. Flatten 'metricsValues' if present
+        # 2. Flatten 'metricsValues' and CLEAN data
         clean_rows = []
         for row in rows:
             base_data = {k: v for k, v in row.items() if k != 'metricsValues'}
             metrics = row.get('metricsValues', {})
+            
             if isinstance(metrics, dict):
-                base_data.update(metrics)
+                # Clean every metric value in case it is nested
+                cleaned_metrics = {k: clean_value(v) for k, v in metrics.items()}
+                base_data.update(cleaned_metrics)
+            
             clean_rows.append(base_data)
             
         df = pd.DataFrame(clean_rows)
@@ -98,32 +113,37 @@ if st.button("Run Analysis"):
             if cf_df.empty or bs_df.empty:
                 st.error("No data returned. Check the ticker format.")
             else:
-                # 2. Extract Columns using EXACT keys from your error log
                 try:
-                    # CASH FLOW KEYS
-                    ocf = cf_df.get('cash_flow_statement_cash_from_operating_activities')
+                    # 2. Extract Columns
+                    # Note: We enforce float conversion to prevent type errors
                     
-                    # Try primary CapEx key, then fallback to Purchases of PPE
-                    capex = cf_df.get('cash_flow_statement_capital_expenditure')
-                    if capex is None:
-                        capex = cf_df.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
+                    # Cash Flow
+                    ocf_raw = cf_df.get('cash_flow_statement_cash_from_operating_activities')
+                    capex_raw = cf_df.get('cash_flow_statement_capital_expenditure')
+                    if capex_raw is None:
+                        capex_raw = cf_df.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
 
-                    # BALANCE SHEET KEYS
-                    assets = bs_df.get('balance_sheet_total_assets')
-                    curr_liab = bs_df.get('balance_sheet_total_current_liabilities')
+                    # Balance Sheet
+                    assets_raw = bs_df.get('balance_sheet_total_assets')
+                    curr_liab_raw = bs_df.get('balance_sheet_total_current_liabilities')
 
-                    # 3. Calculation
-                    if ocf is not None and assets is not None:
-                        # Handle missing CapEx/Liabilities safely
-                        capex = capex if capex is not None else 0
-                        curr_liab = curr_liab if curr_liab is not None else 0
+                    # 3. Safe Calculation
+                    if ocf_raw is not None and assets_raw is not None:
+                        # Ensure numeric (coerce errors to NaN, then fill 0)
+                        ocf = pd.to_numeric(ocf_raw, errors='coerce').fillna(0)
+                        capex = pd.to_numeric(capex_raw, errors='coerce').fillna(0) if capex_raw is not None else 0
                         
-                        # CALCULATION LOGIC:
-                        # FCF = OCF - CapEx (We subtract the absolute value to be safe, ensuring it's an outflow)
-                        # "Purchases of PPE" is usually a positive number in these reports representing cost.
-                        fcf_series = ocf - capex.abs()
-                        
-                        # IC = Total Assets - Current Liabilities
+                        assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
+                        curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0) if curr_liab_raw is not None else 0
+
+                        # CALCULATION:
+                        # If CapEx is negative (outflow), abs() makes it positive so we can subtract it (standardizing logic)
+                        # FCF = OCF - |CapEx|
+                        if isinstance(capex, (int, float)):
+                            fcf_series = ocf - abs(capex)
+                        else:
+                            fcf_series = ocf - capex.abs()
+
                         ic_series = assets - curr_liab
                         
                         # Merge
@@ -164,7 +184,5 @@ if st.button("Run Analysis"):
                             st.warning("Not enough historical data points.")
                     else:
                         st.error("Could not find required columns.")
-                        st.write("Debug: OCF Found?", ocf is not None)
-                        st.write("Debug: Assets Found?", assets is not None)
                 except Exception as e:
                     st.error(f"Calculation Error: {e}")
