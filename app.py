@@ -353,4 +353,50 @@ if target_company_key:
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Compounder Score", f"{score:.1%}")
                     m2.metric("ROIIC", f"{roiic:.1%}")
-                    m3.metric
+                    m3.metric("Reinvestment Rate", f"{reinvest:.1%}")
+                    
+                    # 3. The Boardroom Table (Styled via CSS class 'report-card')
+                    # We build the Markdown table first
+                    table_md = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
+                    
+                    rows_data = [
+                        {"N": f"Total FCF generated ({len(df_final)} yrs)", "V": format_currency(A1), "F": f"$\\sum FCF$", "M": "Accumulated FCF", "L": "A1"},
+                        {"N": f"FCF growth: {format_currency(FCF_start)} → {format_currency(FCF_end)}", "V": format_currency(B1), "F": f"$FCF_{{end}} - FCF_{{start}}$", "M": "Increase in FCF", "L": "B1"},
+                        {"N": "Capital invested to achieve growth", "V": format_currency(A2), "F": f"$IC_{{end}} - IC_{{start}}$", "M": "Increase in IC", "L": "A2"},
+                        {"N": "Return on New Capital", "V": f"{roiic:.1%}", "F": "$B1 / A2$", "M": "ROIIC", "L": "C1"},
+                        {"N": "% of FCF reinvested", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment Rate", "L": "C2"},
+                        {"N": "Compounder Efficiency Score", "V": f"**{score:.1%}**", "F": "$C1 \\times C2$", "M": "Final Score", "L": "Result"},
+                    ]
+                    
+                    for r in rows_data:
+                        table_md += f"| {r['N']} | {r['V']} | {r['F']} | **{r['M']}** | **{r['L']}** |\n"
+
+                    # Wrap in the custom CSS container
+                    st.markdown(f"""
+                    <div class="report-card">
+                        <h4 style="margin-top:0; color:#202124;">Executive Summary</h4>
+                        {st.markdown(table_md, unsafe_allow_html=True) or ""} 
+                    </div>
+                    """, unsafe_allow_html=True)
+                    # Note: We render table_md separately because st.markdown inside HTML strings is tricky. 
+                    # Simpler approach below:
+                    
+                    st.markdown(table_md) # Render standard markdown table (it will pick up our CSS styling)
+
+                    # 4. Expanders for Details
+                    st.write("")
+                    with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
+                        st.dataframe(df_final.style.format("${:,.0f}"), use_container_width=True)
+
+                    with st.expander("📘 Reference: Formula Guide"):
+                        st.markdown("""
+                        **FCF (Free Cash Flow)** = Operating Cash Flow - CapEx  
+                        **IC (Invested Capital)** = Total Assets - Current Liabilities  
+                        **ROIIC** = $\Delta$ FCF / $\Delta$ IC (Target > 15%)  
+                        **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)
+                        """)
+
+                else:
+                    st.error("Insufficient historical data for calculation.")
+            except Exception as e:
+                st.error(f"Error: {e}")
