@@ -61,12 +61,20 @@ def clean_value(val):
         return val.get('value', val.get('raw', val.get('amount', 0)))
     return val
 
+def format_currency(val):
+    """Auto-formats to Billions (B) or Millions (M)"""
+    if val is None: return "N/A"
+    abs_val = abs(val)
+    if abs_val >= 1e9:
+        return f"${val/1e9:,.2f} B"
+    elif abs_val >= 1e6:
+        return f"${val/1e6:,.2f} M"
+    else:
+        return f"${val:,.0f}"
+
 def fetch_data(endpoint_type, company_key, period="annual", limit=30):
-    """
-    Fetches Standardized Financials for a specific period (Annual or Quarterly).
-    """
     url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/5.0"}
+    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/6.0"}
     params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
     
     try:
@@ -86,8 +94,6 @@ def fetch_data(endpoint_type, company_key, period="annual", limit=30):
             clean_rows.append(base_data)
             
         df = pd.DataFrame(clean_rows)
-        
-        # Standardize Date Index
         date_col = None
         if 'reportDate' in df.columns: date_col = 'reportDate'
         elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
@@ -135,7 +141,6 @@ with col_time:
         index=2
     )
 
-# Logic Map
 limit_map = {
     "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
     "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
@@ -147,14 +152,12 @@ include_ttm = "Inc." in timeframe_label
 st.divider()
 
 if target_company_key:
-    st.info(f"⚡ Analyzing **{target_company_key}** ...")
+    # Title showing selected company
+    company_name = selected_label.split('(')[0] if selected_label else target_company_key
     
     with st.spinner("Fetching Annual & Quarterly reports..."):
-        # 1. Fetch ANNUAL Data
         cf_annual = fetch_data("cash-flow-statement", target_company_key, "annual")
         bs_annual = fetch_data("balance-sheet", target_company_key, "annual")
-        
-        # 2. Fetch QUARTERLY Data (For TTM Calculation)
         cf_q = fetch_data("cash-flow-statement", target_company_key, "quarterly", limit=8)
         bs_q = fetch_data("balance-sheet", target_company_key, "quarterly", limit=4)
 
@@ -177,50 +180,36 @@ if target_company_key:
                     assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
                     curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0)
                     
-                    # FCF = OCF - |CapEx|
                     fcf = ocf - capex.abs()
                     ic = assets - curr_liab
                     return pd.DataFrame({'FCF': fcf, 'Invested_Capital': ic}).dropna()
 
                 df_calc = extract_series(cf_annual, bs_annual)
                 
-                # --- PROCESS TTM (The Upgrade) ---
-                # Only if "Inc. YTD" is selected AND we have recent quarterly data
+                # --- PROCESS TTM ---
                 if include_ttm and not cf_q.empty and not bs_q.empty:
                     last_annual_date = df_calc.index[-1]
                     last_quarter_date = cf_q.index[-1]
                     
-                    # Check if we have new data since the last annual report
                     if last_quarter_date > last_annual_date:
-                        # Get last 4 quarters for TTM Cash Flow
                         last_4_q = cf_q.tail(4)
                         if len(last_4_q) == 4:
-                            # Summing quarters gives TTM
                             ocf_ttm = pd.to_numeric(last_4_q.get('cash_flow_statement_cash_from_operating_activities'), errors='coerce').fillna(0).sum()
-                            
                             capex_col = last_4_q.get('cash_flow_statement_capital_expenditure')
                             if capex_col is None: capex_col = last_4_q.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
                             capex_ttm = pd.to_numeric(capex_col, errors='coerce').fillna(0).sum()
                             
                             fcf_ttm = ocf_ttm - abs(capex_ttm)
                             
-                            # Balance Sheet is a SNAPSHOT (Use latest quarter, do not sum)
                             latest_bs = bs_q.iloc[-1]
                             assets_ttm = float(clean_value(latest_bs.get('balance_sheet_total_assets', 0)))
                             liab_ttm = float(clean_value(latest_bs.get('balance_sheet_total_current_liabilities', 0)))
                             ic_ttm = assets_ttm - liab_ttm
                             
-                            # Create TTM Row
-                            ttm_row = pd.DataFrame({
-                                'FCF': [fcf_ttm],
-                                'Invested_Capital': [ic_ttm]
-                            }, index=[last_quarter_date]) # Use latest Q date
-                            
-                            # Append to main dataframe
+                            ttm_row = pd.DataFrame({'FCF': [fcf_ttm], 'Invested_Capital': [ic_ttm]}, index=[last_quarter_date])
                             df_calc = pd.concat([df_calc, ttm_row])
 
                 # --- SLICE DATA ---
-                # Take the last N periods
                 if len(df_calc) > selected_limit:
                     df_final = df_calc.tail(selected_limit)
                 else:
@@ -229,52 +218,122 @@ if target_company_key:
                 if len(df_final) >= 2:
                     start_idx, end_idx = df_final.index[0], df_final.index[-1]
                     
-                    # Labels
-                    s_label = start_idx.year
-                    # Check if end is TTM (if date > last fiscal year end)
-                    if include_ttm and end_idx > cf_annual.index[-1]:
-                        e_label = "TTM (Current)"
-                    else:
-                        e_label = end_idx.year
+                    # Year Labels
+                    try: s_yr = str(start_idx.year)
+                    except: s_yr = str(start_idx)[:4]
+                    
+                    try:
+                        # Determine if end is TTM
+                        if include_ttm and end_idx > cf_annual.index[-1]:
+                            e_yr = "TTM"
+                            e_yr_sub = "TTM" # For formula subscript
+                        else:
+                            e_yr = str(end_idx.year)
+                            e_yr_sub = str(end_idx.year)[-2:] # '24'
+                            s_yr_sub = s_yr[-2:] # '15'
+                    except:
+                        e_yr = str(end_idx)[:4]
+                        e_yr_sub = "End"
+
+                    # --- CALCULATIONS ---
+                    FCF_start = df_final.loc[start_idx, 'FCF']
+                    FCF_end = df_final.loc[end_idx, 'FCF']
+                    IC_start = df_final.loc[start_idx, 'Invested_Capital']
+                    IC_end = df_final.loc[end_idx, 'Invested_Capital']
 
                     A1 = df_final['FCF'].sum()
-                    B1 = df_final.loc[end_idx, 'FCF'] - df_final.loc[start_idx, 'FCF']
-                    A2 = df_final.loc[end_idx, 'Invested_Capital'] - df_final.loc[start_idx, 'Invested_Capital']
+                    B1 = FCF_end - FCF_start
+                    A2 = IC_end - IC_start
                     
                     roiic = B1 / A2 if A2 != 0 else 0
                     reinvest = A2 / A1 if A1 != 0 else 0
                     score = roiic * reinvest
                     
-                    # Display
-                    st.success(f"**Analysis Complete ({s_label} - {e_label})**")
+                    st.header(f"{company_name} Compounder Analysis")
+                    st.caption("(Values in Billions USD)")
+
+                    # --- BUILD THE RESULT TABLE ---
+                    # Columns: Notes | Value | Formula | Metric | Label
                     
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Compounder Score", f"{score:.1%}", help="ROIIC x Reinvestment Rate")
-                    c2.metric("ROIIC", f"{roiic:.1%}", help="Return on Incremental Invested Capital")
-                    c3.metric("Reinvestment Rate", f"{reinvest:.1%}", help="% of Cash Flow reinvested")
+                    # Row 1: A1
+                    row_A1 = {
+                        "Metric": "Accumulated Free Cash Flow",
+                        "Label": "A1",
+                        "Value": format_currency(A1),
+                        "Formula": f"$\\sum FCF_{{{s_yr}-{e_yr}}}$",
+                        "Notes": f"Total FCF generated over the last {len(df_final)} years"
+                    }
                     
-                    if score > 0.15: st.success("✅ **High Probability Compounder**")
-                    elif score > 0.10: st.warning("⚠️ **Moderate Compounder**")
-                    else: st.error("❌ **Low Efficiency**")
+                    # Row 2: B1
+                    row_B1 = {
+                        "Metric": "Increase in Free Cash Flow",
+                        "Label": "B1",
+                        "Value": format_currency(B1),
+                        "Formula": f"$FCF_{{{e_yr}}} - FCF_{{{s_yr}}}$",
+                        "Notes": f"FCF grew from {format_currency(FCF_start)} ({s_yr}) to {format_currency(FCF_end)} ({e_yr})"
+                    }
                     
-                    with st.expander(f"View Underlying Data ({timeframe_label})"):
+                    # Row 3: A2
+                    row_A2 = {
+                        "Metric": "Increase in Invested Capital",
+                        "Label": "A2",
+                        "Value": format_currency(A2),
+                        "Formula": f"$IC_{{{e_yr}}} - IC_{{{s_yr}}}$",
+                        "Notes": "Capital invested to achieve this growth"
+                    }
+                    
+                    # Row 4: C1
+                    row_C1 = {
+                        "Metric": "ROIIC",
+                        "Label": "C1",
+                        "Value": f"{roiic:.1%}",
+                        "Formula": "$B1 / A2$",
+                        "Notes": "Return on Incremental Invested Capital"
+                    }
+                    
+                    # Row 5: C2
+                    row_C2 = {
+                        "Metric": "Reinvestment Rate",
+                        "Label": "C2",
+                        "Value": f"{reinvest:.1%}",
+                        "Formula": "$A2 / A1$",
+                        "Notes": "% of total FCF reinvested into the business"
+                    }
+                    
+                    # Row 6: Result
+                    row_Res = {
+                        "Metric": "Compounder Score",
+                        "Label": "Result",
+                        "Value": f"**{score:.1%}**",
+                        "Formula": "$C1 \\times C2$",
+                        "Notes": "Measures overall compounding efficiency"
+                    }
+
+                    results_data = [row_A1, row_B1, row_A2, row_C1, row_C2, row_Res]
+                    results_df = pd.DataFrame(results_data)
+
+                    # --- RENDER TABLE WITH MARKDOWN (For Math) ---
+                    # Streamlit dataframe doesn't render latex in cells easily, so we build a clean Markdown table.
+                    
+                    md_table = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
+                    for row in results_data:
+                        md_table += f"| {row['Notes']} | {row['Value']} | {row['Formula']} | **{row['Metric']}** | **{row['Label']}** |\n"
+                    
+                    st.markdown(md_table)
+                    
+                    # --- EXPORT BUTTON ---
+                    csv = results_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="⤓ Export to Sheets (CSV)",
+                        data=csv,
+                        file_name=f"{target_company_key}_compounder_analysis.csv",
+                        mime="text/csv",
+                    )
+                    
+                    # --- RAW DATA ---
+                    with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
                         st.dataframe(df_final.style.format("${:,.0f}"))
-                        
-                    with st.expander("📘 Reference: The Compounder Formula Guide"):
-                        st.markdown("""
-                        ### 1. The Objective
-                        Identify companies that generate cash and reinvest it at high rates of return.
 
-                        ### 2. Core Definitions
-                        * **FCF (Free Cash Flow):** Operating Cash Flow - CapEx
-                        * **IC (Invested Capital):** Total Assets - Current Liabilities
-                        * **TTM (Trailing Twelve Months):** Sum of the last 4 quarters. Used for "Current" data to ensure valid comparison with annual figures.
-
-                        ### 3. The Ratios
-                        * **ROIIC:** $\\Delta FCF / \\Delta IC$ (Target: >15-20%)
-                        * **Reinvestment Rate:** $\\Delta IC / \\text{Accumulated FCF}$ (Target: 80-100%)
-                        * **Score:** $ROIIC \\times Reinvestment$
-                        """)
                 else:
                     st.warning("Insufficient data.")
             except Exception as e:
