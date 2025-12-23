@@ -146,23 +146,23 @@ if st.button("🚀 Run Analysis", type="primary"):
                 financials = raw_data.get("financials", {})
                 annual = financials.get("annual", {})
                 
-                # --- 3. SMART KEY MAPPING (UPDATED FOR YOUR JSON) ---
+                # --- 3. SMART KEY MAPPING (FIXED FOR YOUR DATA) ---
                 
-                # Operating Cash Flow
-                cfo, cfo_key = smart_get(annual, ["cfo", "cash_flow_operating"])
+                # Operating Cash Flow (QuickFS usually uses 'cf_cfo' or 'cfo')
+                cfo, cfo_key = smart_get(annual, ["cf_cfo", "cfo", "cash_flow_operating"])
                 
                 # CapEx
                 capex, capex_key = smart_get(annual, ["capex", "capital_expenditures"])
                 
-                # Total Assets (Using 'total_assets' from your JSON)
+                # Total Assets
                 assets, assets_key = smart_get(annual, ["total_assets", "assets"])
                 
-                # Current Liabilities (Using 'total_current_liabilities' from your JSON)
-                liab, liab_key = smart_get(annual, ["total_current_liabilities", "liabilities_current", "current_liabilities"])
+                # Current Liabilities
+                liab, liab_key = smart_get(annual, ["total_current_liabilities", "liabilities_current"])
                 
                 # Identify missing
                 missing = []
-                if cfo is None: missing.append("Operating Cash Flow (cfo)")
+                if cfo is None: missing.append("Operating Cash Flow (cf_cfo)")
                 if capex is None: missing.append("CapEx")
                 if assets is None: missing.append("Total Assets")
                 if liab is None: missing.append("Total Current Liabilities")
