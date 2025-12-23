@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 
 # --- SAFE IMPORT FOR GEMINI ---
-# This prevents the app from crashing if the library is missing
 try:
     import google.generativeai as genai
     has_gemini_lib = True
@@ -76,8 +75,7 @@ def format_currency(val):
 
 def fetch_quickfs_direct(ticker):
     """
-    Directly hits the endpoint provided by the user:
-    https://public-api.quickfs.net/v1/data/all-data/{symbol}?api_key={key}
+    Directly hits the endpoint provided by the user.
     """
     base_url = "https://public-api.quickfs.net/v1/data/all-data"
     url = f"{base_url}/{ticker}"
@@ -101,6 +99,16 @@ def fetch_quickfs_direct(ticker):
     except Exception as e:
         return None, f"Connection Error: {e}"
 
+def smart_get(data_dict, keys_to_try):
+    """
+    Tries multiple potential key names for a metric.
+    Returns the first list found, or None.
+    """
+    for k in keys_to_try:
+        if k in data_dict:
+            return data_dict[k], k 
+    return None, None
+
 # --- INPUT SECTION ---
 with st.container():
     c1, c2 = st.columns([3, 1])
@@ -108,7 +116,7 @@ with st.container():
     with c1:
         ticker_input = st.text_input(
             "Enter Ticker (Format: SYMBOL:COUNTRY)", 
-            value="IBM:US",
+            value="APG:US",
             help="Examples: APG:US, MSFT:US, SHELL:LSE"
         ).strip().upper()
         
@@ -138,27 +146,40 @@ if st.button("🚀 Run Analysis", type="primary"):
                 financials = raw_data.get("financials", {})
                 annual = financials.get("annual", {})
                 
-                # 3. Check Keys
-                required_keys = ["cfo", "capex", "assets", "liabilities_current"]
-                missing = [k for k in required_keys if k not in annual]
+                # --- 3. SMART KEY MAPPING (UPDATED FOR YOUR JSON) ---
+                
+                # Operating Cash Flow
+                cfo, cfo_key = smart_get(annual, ["cfo", "cash_flow_operating"])
+                
+                # CapEx
+                capex, capex_key = smart_get(annual, ["capex", "capital_expenditures"])
+                
+                # Total Assets (Using 'total_assets' from your JSON)
+                assets, assets_key = smart_get(annual, ["total_assets", "assets"])
+                
+                # Current Liabilities (Using 'total_current_liabilities' from your JSON)
+                liab, liab_key = smart_get(annual, ["total_current_liabilities", "liabilities_current", "current_liabilities"])
+                
+                # Identify missing
+                missing = []
+                if cfo is None: missing.append("Operating Cash Flow (cfo)")
+                if capex is None: missing.append("CapEx")
+                if assets is None: missing.append("Total Assets")
+                if liab is None: missing.append("Total Current Liabilities")
                 
                 if missing:
-                    st.error(f"Missing data fields: {missing}")
+                    st.error(f"Could not find the following metrics in QuickFS data: {', '.join(missing)}")
+                    with st.expander("🛠️ Debug: See Available Data Keys"):
+                        st.write(list(annual.keys()))
                 else:
                     # 4. Create DataFrame
-                    # QuickFS arrays are Oldest -> Newest
-                    cfo = annual["cfo"]
-                    capex = annual["capex"]
-                    assets = annual["assets"]
-                    liab = annual["liabilities_current"]
-                    
-                    # Align lengths
+                    # Align lengths (QuickFS arrays are typically Oldest -> Newest)
                     min_len = min(len(cfo), len(capex), len(assets), len(liab))
                     
                     if min_len < 2:
                         st.warning("Insufficient historical data (Need 2+ years).")
                     else:
-                        # Slice to shortest length
+                        # Slice to shortest length (taking the most recent 'min_len' items)
                         df = pd.DataFrame({
                             "OCF": cfo[-min_len:],
                             "CapEx": capex[-min_len:],
@@ -166,8 +187,12 @@ if st.button("🚀 Run Analysis", type="primary"):
                             "Liabilities": liab[-min_len:]
                         })
                         
-                        # Generate Years (if provided, else numeric)
-                        if "fiscal_year" in annual:
+                        # Generate Years
+                        if "period_end_date" in annual:
+                             # Taking just the year "2024" from "2024-12"
+                             raw_dates = annual["period_end_date"][-min_len:]
+                             df.index = [d.split('-')[0] for d in raw_dates]
+                        elif "fiscal_year" in annual:
                             df.index = annual["fiscal_year"][-min_len:]
                         else:
                             df.index = range(1, min_len + 1)
