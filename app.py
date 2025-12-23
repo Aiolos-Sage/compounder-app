@@ -2,7 +2,14 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-import google.generativeai as genai
+
+# --- SAFE IMPORT FOR GEMINI ---
+# This prevents the app from crashing if the library is missing
+try:
+    import google.generativeai as genai
+    has_gemini_lib = True
+except ImportError:
+    has_gemini_lib = False
 
 # --- 1. PAGE CONFIG & STYLING ---
 st.set_page_config(page_title="Compounder Formula (QuickFS)", page_icon="📊", layout="wide")
@@ -50,12 +57,14 @@ except (FileNotFoundError, KeyError):
     st.stop()
 
 # Optional: Gemini Configuration
-try:
-    GEMINI_KEY = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=GEMINI_KEY)
-    has_gemini = True
-except (FileNotFoundError, KeyError):
-    has_gemini = False
+has_gemini_key = False
+if has_gemini_lib:
+    try:
+        GEMINI_KEY = st.secrets["GOOGLE_API_KEY"]
+        genai.configure(api_key=GEMINI_KEY)
+        has_gemini_key = True
+    except (FileNotFoundError, KeyError):
+        has_gemini_key = False
 
 # --- HELPER FUNCTIONS ---
 def format_currency(val):
@@ -97,7 +106,6 @@ with st.container():
     c1, c2 = st.columns([3, 1])
     
     with c1:
-        # UPDATED: Placeholder now shows correct QuickFS format (Ticker:Country)
         ticker_input = st.text_input(
             "Enter Ticker (Format: SYMBOL:COUNTRY)", 
             value="IBM:US",
@@ -235,7 +243,7 @@ if st.button("🚀 Run Analysis", type="primary"):
                         st.write("")
                         st.subheader("🤖 AI Analyst")
                         
-                        if has_gemini:
+                        if has_gemini_lib and has_gemini_key:
                             if st.button("Generate AI Assessment"):
                                 with st.spinner("Gemini is analyzing the financials..."):
                                     prompt = f"""
@@ -259,7 +267,9 @@ if st.button("🚀 Run Analysis", type="primary"):
                                     model = genai.GenerativeModel("gemini-1.5-flash")
                                     response = model.generate_content(prompt)
                                     st.markdown(response.text)
-                        else:
+                        elif not has_gemini_lib:
+                            st.warning("⚠️ Google AI library not found. Add `google-generativeai` to `requirements.txt`.")
+                        elif not has_gemini_key:
                             st.info("To enable AI analysis, add `GOOGLE_API_KEY` to your secrets.")
 
                         # Data Expander
