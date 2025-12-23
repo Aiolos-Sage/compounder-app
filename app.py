@@ -188,7 +188,7 @@ if st.session_state.data_loaded:
         end_idx = len(valid_end_options)-1 
         end_period = st.selectbox("End Year", valid_end_options, index=end_idx)
     
-    # --- FILTERING LOGIC ---
+    # --- FILTERING ---
     if end_period == "TTM" and df_ttm is not None:
         df_combined = pd.concat([df_main, df_ttm])
         df_slice = df_combined.loc[start_period:] 
@@ -249,12 +249,30 @@ if st.session_state.data_loaded:
         </div>
         """, unsafe_allow_html=True)
         
-        # ADDED SPACE HERE
         st.write("")
         st.write("")
         
+        # --- VIEW DATA MODULE (UPDATED) ---
         with st.expander("View Data"):
-            st.dataframe(df_slice.style.format("{:,.0f}"))
+            
+            st.markdown("""
+            <small style="color: #5f6368;">
+            <b>QuickFS Data Mapping:</b><br>
+            • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
+            • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
+            • Total Assets and Total Current Liabilities are part of the <b>Balance Sheet</b>.
+            </small>
+            <br><br>
+            """, unsafe_allow_html=True)
+            
+            # Create a display-friendly version of the dataframe
+            df_display = df_slice.rename(columns={
+                "OCF": "Operating Cash Flow",
+                "Assets": "Total Assets",
+                "Liabilities": "Total Current Liabilities"
+            })
+            
+            st.dataframe(df_display.style.format("{:,.0f}"))
             
     else:
         st.warning("Select a range with at least 2 periods.")
