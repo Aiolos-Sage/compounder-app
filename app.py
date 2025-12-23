@@ -140,7 +140,7 @@ with col_input:
 with col_btn:
     load_btn = st.button("Load Financials", type="primary", use_container_width=True)
 
-# 2. State Management (Data Persistence)
+# 2. State Management
 if "data_loaded" not in st.session_state:
     st.session_state.data_loaded = False
     st.session_state.raw_df = None
@@ -161,9 +161,9 @@ if load_btn and ticker:
                 st.session_state.meta = raw.get("metadata", {})
                 st.session_state.data_loaded = True
             else:
-                st.error(df_ttm) # Error message returned in 2nd var
+                st.error(df_ttm)
 
-# 3. Main Dashboard (Only if loaded)
+# 3. Main Dashboard
 if st.session_state.data_loaded:
     df_main = st.session_state.raw_df
     df_ttm = st.session_state.ttm_df
@@ -172,35 +172,27 @@ if st.session_state.data_loaded:
     st.divider()
     
     # --- TIMEFRAME SELECTOR ---
-    # Create master list of available periods
     available_years = list(df_main.index)
     available_options = available_years.copy()
     if df_ttm is not None:
         available_options.append("TTM")
     
-    # Default Indices
     default_end_idx = len(available_options) - 1
-    default_start_idx = max(0, default_end_idx - 10) # Default to 10 years back
+    default_start_idx = max(0, default_end_idx - 10)
     
     c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
         start_period = st.selectbox("Start Year", available_years, index=default_start_idx)
     with c2:
-        # Filter end options to be >= start_period
         valid_end_options = [opt for opt in available_options if opt == "TTM" or opt >= start_period]
-        # Logic to keep TTM selected if possible
         end_idx = len(valid_end_options)-1 
         end_period = st.selectbox("End Year", valid_end_options, index=end_idx)
     
     # --- FILTERING LOGIC ---
-    # Combine Annual + TTM if selected
     if end_period == "TTM" and df_ttm is not None:
         df_combined = pd.concat([df_main, df_ttm])
-        # Slice from Start -> TTM
-        # We need the index of start_period in the combined DF
         df_slice = df_combined.loc[start_period:] 
     else:
-        # Slice from Start -> End Year
         df_slice = df_main.loc[start_period : end_period]
 
     # --- CALCULATIONS ---
@@ -249,12 +241,17 @@ if st.session_state.data_loaded:
         """
         st.markdown(table_html, unsafe_allow_html=True)
         
+        # Verdict Banner
         st.markdown(f"""
         <div style="background-color:{v_bg}; padding:12px; border-radius:8px; margin-top:15px; border:1px solid {v_bg}; display:flex; align-items:center; gap:10px;">
             <span style="font-size:1.2rem;">🧬</span>
             <span style="color:{v_col}; font-weight:600;">Phase: {v_txt}</span>
         </div>
         """, unsafe_allow_html=True)
+        
+        # ADDED SPACE HERE
+        st.write("")
+        st.write("")
         
         with st.expander("View Data"):
             st.dataframe(df_slice.style.format("{:,.0f}"))
