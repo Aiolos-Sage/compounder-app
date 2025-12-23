@@ -1,10 +1,10 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
+from quickfs import QuickFS  # Using the library from the GitHub repo
 
-# --- 1. PAGE CONFIG & GOOGLE MATERIAL CSS ---
-st.set_page_config(page_title="Compounder Formula", page_icon="📊", layout="wide")
+# --- 1. PAGE CONFIG & STYLING ---
+st.set_page_config(page_title="Compounder Formula (QuickFS)", page_icon="📊", layout="wide")
 
 st.markdown("""
 <style>
@@ -13,389 +13,238 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Roboto', sans-serif;
     }
+    .block-container { max-width: 1200px; padding-top: 2rem; padding-bottom: 3rem; }
+    
+    h1 { font-weight: 700; color: #202124; margin-bottom: 0.5rem; }
+    .subtitle { color: #5f6368; margin-bottom: 2rem; }
 
-    .block-container {
-        padding-top: 3rem;
-        padding-bottom: 3rem;
-        max-width: 1200px;
-    }
-
-    h1 {
-        font-weight: 700;
-        color: #202124;
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-    }
-    .subtitle {
-        color: #5f6368;
-        font-size: 1.1rem;
-        margin-bottom: 2rem;
-    }
-
-    /* Metric Cards */
+    /* Cards */
     div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        background-color: #ffffff; padding: 20px; border-radius: 12px;
+        border: 1px solid #e0e0e0; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
-    label[data-testid="stMetricLabel"] {
-        font-size: 0.95rem;
-        color: #5f6368;
-        font-weight: 500;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #1a73e8;
-    }
-    div[data-testid="stMetricDelta"] {
-        font-size: 0.85rem;
-        color: #3c4043;
-    }
-
-    /* Table Styling */
+    div[data-testid="stMetricValue"] { color: #1a73e8; font-weight: 700; font-size: 1.6rem; }
+    
+    /* Table */
     table {
-        width: 100%;
-        border-collapse: collapse;
-        font-family: 'Roboto', sans-serif;
-        margin-top: 20px;
-        background-color: #ffffff;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        width: 100%; border-collapse: collapse; font-family: 'Roboto', sans-serif;
+        margin-top: 20px; background-color: #ffffff; border-radius: 8px;
+        overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
-    th {
-        text-align: left;
-        color: #5f6368;
-        font-weight: 600;
-        border-bottom: 2px solid #e0e0e0;
-        padding: 12px 15px;
-        background-color: #f8f9fa;
-    }
-    td {
-        padding: 12px 15px;
-        border-bottom: 1px solid #f1f3f4;
-        color: #202124;
-    }
-    tr:last-child td {
-        border-bottom: none;
-        font-weight: bold;
-        background-color: #f8f9fa;
-    }
+    th { text-align: left; color: #5f6368; font-weight: 600; background-color: #f8f9fa; padding: 12px 15px; }
+    td { padding: 12px 15px; border-bottom: 1px solid #f1f3f4; color: #202124; }
+    tr:last-child td { border-bottom: none; font-weight: bold; background-color: #f8f9fa; }
+
+    /* Verdict Tags */
+    .verdict-tag { padding: 4px 12px; border-radius: 16px; font-size: 0.85rem; font-weight: 500; margin-top: 5px; display: inline-block; }
+    .v-green { background-color: #e6f4ea; color: #137333; }
+    .v-blue { background-color: #e8f0fe; color: #1967d2; }
+    .v-yellow { background-color: #fef7e0; color: #b06000; }
+    .v-red { background-color: #fce8e6; color: #c5221f; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- HEADER ---
 st.markdown("<h1>Compounder Dashboard</h1>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Analyze capital allocation efficiency using the Compounder Formula.</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Powered by <strong>QuickFS SDK</strong>. Analyze capital allocation efficiency.</div>", unsafe_allow_html=True)
 
 # --- SECURE CONFIGURATION ---
 try:
-    API_KEY = st.secrets["FISCAL_API_KEY"]
+    # Use the same key variable name for consistency
+    API_KEY = st.secrets["QUICKFS_API_KEY"]
 except (FileNotFoundError, KeyError):
-    st.error("⚠️ API Key missing. Please add 'FISCAL_API_KEY' to your Streamlit Secrets.")
+    st.error("⚠️ API Key missing. Please add `QUICKFS_API_KEY` to your Streamlit Secrets.")
     st.stop()
 
-BASE_URL = "https://api.fiscal.ai/v1/company/financials"
-LIST_URL = "https://api.fiscal.ai/v2/companies-list"
-
-# --- LOGIC & HELPERS ---
-def normalize_exchange(exchange_name):
-    if not exchange_name: return "UNKNOWN"
-    name = str(exchange_name).upper()
-    if "NASDAQ" in name: return "NASDAQ"
-    if "NEW YORK" in name or "NYSE" in name: return "NYSE"
-    if "LONDON" in name or "LSE" in name: return "LSE"
-    if "TORONTO" in name or "TSX" in name: return "TSX"
-    if "AMEX" in name: return "AMEX"
-    if "OTC" in name: return "OTC"
-    return name.split(' ')[0]
-
-@st.cache_data(ttl=3600)
-def get_company_map():
-    headers = {"X-API-KEY": API_KEY}
-    params = {"pageNumber": 1, "pageSize": 6000, "apiKey": API_KEY}
-    try:
-        response = requests.get(LIST_URL, headers=headers, params=params)
-        if response.status_code != 200: return {}
-        data = response.json()
-        rows = data.get('data', data) if isinstance(data, dict) else data
-        company_map = {}
-        for row in rows:
-            ticker = row.get('ticker')
-            name = row.get('companyName', row.get('name', ticker))
-            raw_exchange = row.get('exchangeName', row.get('exchange', 'UNKNOWN'))
-            exchange_prefix = normalize_exchange(raw_exchange)
-            if ticker and exchange_prefix != "UNKNOWN":
-                full_key = f"{exchange_prefix}_{ticker}"
-                label = f"{name} ({ticker})"
-                company_map[label] = full_key
-        return company_map
-    except Exception:
-        return {}
-
-def clean_value(val):
-    if isinstance(val, dict):
-        return val.get('value', val.get('raw', val.get('amount', 0)))
-    return val
-
+# --- HELPER FUNCTIONS ---
 def format_currency(val):
-    if val is None: return "N/A"
+    if val is None or pd.isna(val): return "N/A"
     abs_val = abs(val)
-    if abs_val >= 1e9:
-        return f"${val/1e9:,.2f} B"
-    elif abs_val >= 1e6:
-        return f"${val/1e6:,.2f} M"
-    else:
-        return f"${val:,.0f}"
+    if abs_val >= 1e9: return f"${val/1e9:,.2f} B"
+    if abs_val >= 1e6: return f"${val/1e6:,.2f} M"
+    return f"${val:,.0f}"
 
-def fetch_data(endpoint_type, company_key, period="annual", limit=30):
-    url = f"{BASE_URL}/{endpoint_type}/standardized"
-    headers = {"X-API-KEY": API_KEY, "User-Agent": "StreamlitCompounder/10.0"}
-    params = {"companyKey": company_key, "periodType": period, "currency": "USD", "limit": limit, "apiKey": API_KEY}
+def get_data_from_sdk(ticker):
+    """
+    Uses the QuickFS library to fetch full data.
+    """
     try:
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code != 200: return pd.DataFrame()
-        data = response.json()
-        rows = data.get('data', data) if isinstance(data, dict) else data
-        if not rows: return pd.DataFrame()
-        clean_rows = []
-        for row in rows:
-            base_data = {k: v for k, v in row.items() if k != 'metricsValues'}
-            metrics = row.get('metricsValues', {})
-            if isinstance(metrics, dict):
-                cleaned_metrics = {k: clean_value(v) for k, v in metrics.items()}
-                base_data.update(cleaned_metrics)
-            clean_rows.append(base_data)
-        df = pd.DataFrame(clean_rows)
-        date_col = None
-        if 'reportDate' in df.columns: date_col = 'reportDate'
-        elif 'fiscalDate' in df.columns: date_col = 'fiscalDate'
-        elif 'date' in df.columns: date_col = 'date'
-        if date_col:
-            df['date_index'] = pd.to_datetime(df[date_col])
-            df = df.sort_values(by='date_index', ascending=True).set_index('date_index')
-        return df
-    except Exception:
-        return pd.DataFrame()
+        # Initialize Client as per LautaroParada/quickfs documentation
+        client = QuickFS(API_KEY)
+        
+        # 'get_data_full' pulls metadata + all financial statements in one go
+        response = client.get_data_full(symbol=ticker)
+        
+        return response
+    except Exception as e:
+        return None
 
 # --- INPUT SECTION ---
 with st.container():
-    with st.spinner("Connecting to database..."):
-        company_map = get_company_map()
-
-    col_search, col_time = st.columns([2, 1])
+    c1, c2 = st.columns([3, 1])
     
-    with col_search:
-        if company_map:
-            selected_label = st.selectbox(
-                "Select Company", 
-                options=list(company_map.keys()),
-                index=None,
-                placeholder="Search by Ticker or Name (e.g. NVDA)...",
-                label_visibility="visible"
-            )
-            target_company_key = company_map[selected_label] if selected_label else None
-        else:
-            st.error("Database Connection Failed.")
-            target_company_key = None
-
-    with col_time:
-        timeframe_label = st.selectbox(
+    with c1:
+        ticker_input = st.text_input(
+            "Enter Ticker (Format: EXCHANGE:SYMBOL)", 
+            value="US:MSFT",
+            help="Examples: US:AAPL, LSE:SHELL, TSX:SHOP"
+        ).strip().upper()
+        
+    with c2:
+        timeframe = st.selectbox(
             "Timeframe",
-            options=[
-                "5 Years (Inc. YTD/TTM)", "Last 5 Fiscal Years",
-                "10 Years (Inc. YTD/TTM)", "Last 10 Fiscal Years",
-                "20 Years (Inc. YTD/TTM)", "Last 20 Fiscal Years"
-            ],
-            index=2
+            ["5 Years", "10 Years", "20 Years"],
+            index=1
         )
+        limit_map = {"5 Years": 5, "10 Years": 10, "20 Years": 20}
+        selected_limit = limit_map[timeframe]
 
-    limit_map = {
-        "5 Years (Inc. YTD/TTM)": 5, "Last 5 Fiscal Years": 5,
-        "10 Years (Inc. YTD/TTM)": 10, "Last 10 Fiscal Years": 10,
-        "20 Years (Inc. YTD/TTM)": 20, "Last 20 Fiscal Years": 20
-    }
-    selected_limit = limit_map[timeframe_label]
-    include_ttm = "Inc." in timeframe_label
+st.divider()
 
-st.write("") 
-
-# --- ANALYSIS EXECUTION ---
-if target_company_key:
-    company_name = selected_label.split('(')[0] if selected_label else target_company_key
-    
-    with st.spinner(f"Analyzing {company_name}..."):
-        cf_annual = fetch_data("cash-flow-statement", target_company_key, "annual")
-        bs_annual = fetch_data("balance-sheet", target_company_key, "annual")
-        cf_q = fetch_data("cash-flow-statement", target_company_key, "quarterly", limit=8)
-        bs_q = fetch_data("balance-sheet", target_company_key, "quarterly", limit=4)
-
-        if cf_annual.empty or bs_annual.empty:
-            st.warning(f"No annual data found for {company_name}.")
+# --- MAIN ANALYSIS ---
+if st.button("🚀 Run Analysis", type="primary"):
+    with st.spinner(f"Fetching data for {ticker_input} using QuickFS SDK..."):
+        
+        # 1. Fetch Data using SDK
+        data = get_data_from_sdk(ticker_input)
+        
+        if not data:
+            st.error("Connection Error: Could not retrieve data. Check your API Key and Ticker format.")
+        elif "error" in data:
+             # QuickFS sometimes returns {'error': '...'}
+             st.error(f"API Error: {data['error']}")
         else:
             try:
-                # --- DATA PROCESSING ---
-                def extract_series(cf, bs):
-                    ocf_raw = cf.get('cash_flow_statement_cash_from_operating_activities')
-                    capex_raw = cf.get('cash_flow_statement_capital_expenditure')
-                    if capex_raw is None: capex_raw = cf.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
-                    assets_raw = bs.get('balance_sheet_total_assets')
-                    curr_liab_raw = bs.get('balance_sheet_total_current_liabilities')
-                    
-                    if ocf_raw is None or assets_raw is None: return None
-                    
-                    ocf = pd.to_numeric(ocf_raw, errors='coerce').fillna(0)
-                    capex = pd.to_numeric(capex_raw, errors='coerce').fillna(0)
-                    assets = pd.to_numeric(assets_raw, errors='coerce').fillna(0)
-                    curr_liab = pd.to_numeric(curr_liab_raw, errors='coerce').fillna(0)
-                    
-                    fcf = ocf - capex.abs()
-                    ic = assets - curr_liab
-                    return pd.DataFrame({'FCF': fcf, 'Invested_Capital': ic}).dropna()
-
-                df_calc = extract_series(cf_annual, bs_annual)
+                # 2. Extract Data
+                # The SDK returns the raw JSON structure from QuickFS
+                metadata = data.get("metadata", {})
+                financials = data.get("financials", {})
+                annual = financials.get("annual", {})
                 
-                # --- TTM LOGIC ---
-                if include_ttm and not cf_q.empty and not bs_q.empty:
-                    last_annual = df_calc.index[-1]
-                    last_q = cf_q.index[-1]
-                    if last_q > last_annual:
-                        last_4 = cf_q.tail(4)
-                        if len(last_4) == 4:
-                            ocf_t = pd.to_numeric(last_4.get('cash_flow_statement_cash_from_operating_activities'), errors='coerce').fillna(0).sum()
-                            cpx_col = last_4.get('cash_flow_statement_capital_expenditure')
-                            if cpx_col is None: cpx_col = last_4.get('cash_flow_statement_purchases_of_property_plant_and_equipment')
-                            cpx_t = pd.to_numeric(cpx_col, errors='coerce').fillna(0).sum()
-                            fcf_t = ocf_t - abs(cpx_t)
-                            
-                            lbs = bs_q.iloc[-1]
-                            ast_t = float(clean_value(lbs.get('balance_sheet_total_assets', 0)))
-                            liab_t = float(clean_value(lbs.get('balance_sheet_total_current_liabilities', 0)))
-                            ic_t = ast_t - liab_t
-                            
-                            ttm_row = pd.DataFrame({'FCF': [fcf_t], 'Invested_Capital': [ic_t]}, index=[last_q])
-                            df_calc = pd.concat([df_calc, ttm_row])
+                company_name = metadata.get("name", ticker_input)
+                currency = metadata.get("currency", "USD")
 
-                # --- SLICING ---
-                if len(df_calc) > selected_limit:
-                    df_final = df_calc.tail(selected_limit)
+                # 3. Create DataFrame
+                # QuickFS arrays are typically [Oldest .... Newest]
+                # We extract the specific metrics for the Compounder Formula
+                
+                # Check if data exists
+                if not annual:
+                    st.error("No annual data found for this ticker.")
                 else:
-                    df_final = df_calc
-
-                if len(df_final) >= 2:
-                    start_idx, end_idx = df_final.index[0], df_final.index[-1]
+                    # Metrics mapping (QuickFS keys)
+                    # cfo = Operating Cash Flow
+                    # capex = Capital Expenditures
+                    # assets = Total Assets
+                    # liabilities_current = Total Current Liabilities
                     
-                    # Labels
-                    try: s_yr = str(start_idx.year)
-                    except: s_yr = str(start_idx)[:4]
-                    try:
-                        if include_ttm and end_idx > cf_annual.index[-1]: e_yr = "TTM"
-                        else: e_yr = str(end_idx.year)
-                    except: e_yr = str(end_idx)[:4]
-
-                    # Values
-                    FCF_start = df_final.loc[start_idx, 'FCF']
-                    FCF_end = df_final.loc[end_idx, 'FCF']
-                    IC_start = df_final.loc[start_idx, 'Invested_Capital']
-                    IC_end = df_final.loc[end_idx, 'Invested_Capital']
-
-                    A1 = df_final['FCF'].sum()
-                    B1 = FCF_end - FCF_start
-                    A2 = IC_end - IC_start
+                    cfo = annual.get("cfo", [])
+                    capex = annual.get("capex", [])
+                    assets = annual.get("assets", [])
+                    liab = annual.get("liabilities_current", [])
                     
-                    roiic = B1 / A2 if A2 != 0 else 0
-                    reinvest = A2 / A1 if A1 != 0 else 0
-                    score = roiic * reinvest
+                    # Handle Dates (fiscal_year is usually provided)
+                    years = annual.get("fiscal_year", [])
                     
-                    # --- DETERMINE VERDICT (Logic Below Table) ---
-                    # Defines the text, background color, and text color based on result
-                    verdict_text = ""
-                    bg_color = ""
-                    text_color = ""
+                    # Ensure all arrays align to the shortest length
+                    min_len = min(len(cfo), len(capex), len(assets), len(liab), len(years))
                     
-                    if reinvest < 0.20:
-                        verdict_text = "Cash Cow (Mature, low growth, distributes dividends)"
-                        bg_color = "#fef7e0" # Light Yellow
-                        text_color = "#b06000" # Dark Gold
-                    elif 0.80 <= reinvest <= 1.00:
-                        verdict_text = "Aggressive Compounder"
-                        bg_color = "#e6f4ea" # Light Green
-                        text_color = "#137333" # Google Green
-                    elif reinvest > 1.00:
-                        verdict_text = "Company is investing more than it earns (funding via debt or equity)"
-                        bg_color = "#fce8e6" # Light Red
-                        text_color = "#c5221f" # Google Red
+                    if min_len < 2:
+                        st.warning("Not enough historical data to calculate compounder score (Need 2+ years).")
                     else:
-                        verdict_text = "Moderate Reinvestment (Standard Growth)"
-                        bg_color = "#e8f0fe" # Light Blue
-                        text_color = "#1967d2" # Google Blue
-
-                    # --- RENDER RESULTS ---
-                    st.markdown(f"<h3>{company_name} Analysis ({s_yr} - {e_yr})</h3>", unsafe_allow_html=True)
-                    
-                    # 1. Metrics
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
-                    m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
-                    m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
-                    
-                    # 2. Table (No label in row C2)
-                    table_md = "| Notes | Value | Formula | Metric | Label |\n|---|---|---|---|---|\n"
-                    rows_data = [
-                        {"N": f"Total FCF generated ({len(df_final)} yrs)", "V": format_currency(A1), "F": f"$\\sum FCF$", "M": "Accumulated FCF", "L": "A1"},
-                        {"N": f"FCF growth: {format_currency(FCF_start)} → {format_currency(FCF_end)}", "V": format_currency(B1), "F": f"$FCF_{{end}} - FCF_{{start}}$", "M": "Increase in FCF", "L": "B1"},
-                        {"N": "Capital invested to achieve growth", "V": format_currency(A2), "F": f"$IC_{{end}} - IC_{{start}}$", "M": "Increase in IC", "L": "A2"},
-                        {"N": "Return on New Capital", "V": f"{roiic:.1%}", "F": "$B1 / A2$", "M": "ROIIC (>15% Target)", "L": "C1"},
-                        {"N": "% of FCF reinvested", "V": f"{reinvest:.1%}", "F": "$A2 / A1$", "M": "Reinvestment (>80% Target)", "L": "C2"},
-                        {"N": "Compounder Efficiency Score", "V": f"**{score:.1%}**", "F": "$C1 \\times C2$", "M": "Score (>20% Target)", "L": "Result"},
-                    ]
-                    
-                    for r in rows_data:
-                        table_md += f"| {r['N']} | {r['V']} | {r['F']} | **{r['M']}** | **{r['L']}** |\n"
-
-                    st.markdown(table_md, unsafe_allow_html=True)
-                    
-                    # 3. VERDICT ROW (New Dynamic Component)
-                    st.markdown(f"""
-                    <div style="
-                        background-color: {bg_color}; 
-                        padding: 16px; 
-                        border-radius: 8px; 
-                        margin-top: 15px; 
-                        border: 1px solid {bg_color};
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                    ">
-                        <span style="font-size: 1.2rem;">🧬</span>
-                        <span style="color: {text_color}; font-weight: 600; font-size: 1rem;">
-                            Corporate Phase: {verdict_text}
-                        </span>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # 4. Details & Guide
-                    st.write("")
-                    with st.expander(f"View Underlying Data ({s_yr}-{e_yr})"):
-                        st.dataframe(df_final.style.format("${:,.0f}"), use_container_width=True)
-
-                    with st.expander("📘 Reference: Formula Guide"):
-                        st.markdown("""
-                        **FCF (Free Cash Flow)** = Operating Cash Flow - CapEx  
-                        **IC (Invested Capital)** = Total Assets - Current Liabilities  
-                        **ROIIC** = $\Delta$ FCF / $\Delta$ IC (Target > 15%)  
-                        **Reinvestment Rate** = $\Delta$ IC / Accumulated FCF (Target > 80%)  
+                        # Slice to valid length
+                        df = pd.DataFrame({
+                            "Year": years[-min_len:],
+                            "OCF": cfo[-min_len:],
+                            "CapEx": capex[-min_len:],
+                            "Assets": assets[-min_len:],
+                            "Liabilities": liab[-min_len:]
+                        })
                         
-                        **Reinvestment Interpretation:**
-                        * **< 20%:** Cash Cow (Mature, low growth, distributes dividends)
-                        * **80% - 100%:** Aggressive Compounder
-                        * **> 100%:** Company is investing more than it earns (funding via debt/equity)
-                        """)
+                        df.set_index("Year", inplace=True)
+                        
+                        # 4. Calculate Variables
+                        # FCF = OCF - |CapEx|
+                        df['FCF'] = df['OCF'] - df['CapEx'].abs()
+                        
+                        # Invested Capital (Operating Approach)
+                        df['IC'] = df['Assets'] - df['Liabilities']
+                        
+                        # 5. Filter by Timeframe
+                        if len(df) > selected_limit:
+                            df_slice = df.tail(selected_limit)
+                        else:
+                            df_slice = df
+                            
+                        # 6. Final Formulas
+                        start_year = df_slice.index[0]
+                        end_year = df_slice.index[-1]
+                        
+                        A1 = df_slice['FCF'].sum() # Accumulated FCF
+                        
+                        FCF_start = df_slice.loc[start_year, 'FCF']
+                        FCF_end = df_slice.loc[end_year, 'FCF']
+                        B1 = FCF_end - FCF_start # Growth in FCF
+                        
+                        IC_start = df_slice.loc[start_year, 'IC']
+                        IC_end = df_slice.loc[end_year, 'IC']
+                        A2 = IC_end - IC_start # Growth in IC
+                        
+                        # Ratios
+                        roiic = B1 / A2 if A2 != 0 else 0
+                        reinvest = A2 / A1 if A1 != 0 else 0
+                        score = roiic * reinvest
+                        
+                        # Verdict Logic
+                        if reinvest < 0.20:
+                            v_txt, v_bg, v_col = "Cash Cow (Mature/Dividends)", "#fef7e0", "#b06000"
+                        elif 0.80 <= reinvest <= 1.00:
+                            v_txt, v_bg, v_col = "Aggressive Compounder", "#e6f4ea", "#137333"
+                        elif reinvest > 1.00:
+                            v_txt, v_bg, v_col = "External Funding (Investing > Earnings)", "#fce8e6", "#c5221f"
+                        else:
+                            v_txt, v_bg, v_col = "Moderate Reinvestment", "#e8f0fe", "#1967d2"
 
-                else:
-                    st.error("Insufficient historical data for calculation.")
+                        # --- RENDER RESULTS ---
+                        st.markdown(f"<h3>{company_name} ({currency})</h3>", unsafe_allow_html=True)
+                        st.caption(f"Analysis Period: {start_year} - {end_year}")
+
+                        # Metrics
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
+                        m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
+                        m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
+
+                        # Table
+                        table_html = f"""
+                        <table>
+                            <thead>
+                                <tr><th>Notes</th><th>Value</th><th>Formula</th><th>Metric</th><th>Label</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Total FCF ({len(df_slice)} yrs)</td><td>{format_currency(A1)}</td><td>∑ FCF</td><td><b>Accumulated FCF</b></td><td><b>A1</b></td></tr>
+                                <tr><td>FCF Growth</td><td>{format_currency(B1)}</td><td>FCF<sub>end</sub> - FCF<sub>start</sub></td><td><b>Increase in FCF</b></td><td><b>B1</b></td></tr>
+                                <tr><td>Capital Invested</td><td>{format_currency(A2)}</td><td>IC<sub>end</sub> - IC<sub>start</sub></td><td><b>Increase in IC</b></td><td><b>A2</b></td></tr>
+                                <tr><td>Return on New Capital</td><td>{roiic:.1%}</td><td>B1 / A2</td><td><b>ROIIC (>15%)</b></td><td><b>C1</b></td></tr>
+                                <tr><td>% Reinvested</td><td>{reinvest:.1%}</td><td>A2 / A1</td><td><b>Reinvestment (>80%)</b></td><td><b>C2</b></td></tr>
+                                <tr style="background-color:#f8f9fa"><td>Efficiency Score</td><td>{score:.1%}</td><td>C1 × C2</td><td><b>Final Score (>20%)</b></td><td><b>Result</b></td></tr>
+                            </tbody>
+                        </table>
+                        """
+                        st.markdown(table_html, unsafe_allow_html=True)
+
+                        # Verdict Banner
+                        st.markdown(f"""
+                        <div style="background-color:{v_bg}; padding:15px; border-radius:8px; margin-top:15px; border:1px solid {v_bg}; display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:1.2rem;">🧬</span>
+                            <span style="color:{v_col}; font-weight:600;">Corporate Phase: {v_txt}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Data Expander
+                        st.write("")
+                        with st.expander("View Underlying Data"):
+                            st.dataframe(df_slice.style.format("{:,.0f}"))
+
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Calculation Error: {e}")
