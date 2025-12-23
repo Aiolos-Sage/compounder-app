@@ -1,7 +1,8 @@
 import streamlit as st
+import requests
 import pandas as pd
 import numpy as np
-from quickfs import QuickFS  # Using the library from the GitHub repo
+import google.generativeai as genai
 
 # --- 1. PAGE CONFIG & STYLING ---
 st.set_page_config(page_title="Compounder Formula (QuickFS)", page_icon="📊", layout="wide")
@@ -34,27 +35,27 @@ st.markdown("""
     th { text-align: left; color: #5f6368; font-weight: 600; background-color: #f8f9fa; padding: 12px 15px; }
     td { padding: 12px 15px; border-bottom: 1px solid #f1f3f4; color: #202124; }
     tr:last-child td { border-bottom: none; font-weight: bold; background-color: #f8f9fa; }
-
-    /* Verdict Tags */
-    .verdict-tag { padding: 4px 12px; border-radius: 16px; font-size: 0.85rem; font-weight: 500; margin-top: 5px; display: inline-block; }
-    .v-green { background-color: #e6f4ea; color: #137333; }
-    .v-blue { background-color: #e8f0fe; color: #1967d2; }
-    .v-yellow { background-color: #fef7e0; color: #b06000; }
-    .v-red { background-color: #fce8e6; color: #c5221f; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- HEADER ---
 st.markdown("<h1>Compounder Dashboard</h1>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Powered by <strong>QuickFS SDK</strong>. Analyze capital allocation efficiency.</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Powered by <strong>QuickFS</strong>. Analyze capital allocation efficiency.</div>", unsafe_allow_html=True)
 
 # --- SECURE CONFIGURATION ---
 try:
-    # Use the same key variable name for consistency
     API_KEY = st.secrets["QUICKFS_API_KEY"]
 except (FileNotFoundError, KeyError):
     st.error("⚠️ API Key missing. Please add `QUICKFS_API_KEY` to your Streamlit Secrets.")
     st.stop()
+
+# Optional: Gemini Configuration
+try:
+    GEMINI_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GEMINI_KEY)
+    has_gemini = True
+except (FileNotFoundError, KeyError):
+    has_gemini = False
 
 # --- HELPER FUNCTIONS ---
 def format_currency(val):
@@ -64,38 +65,47 @@ def format_currency(val):
     if abs_val >= 1e6: return f"${val/1e6:,.2f} M"
     return f"${val:,.0f}"
 
-def get_data_from_sdk(ticker):
+def fetch_quickfs_direct(ticker):
     """
-    Uses the QuickFS library to fetch full data.
+    Directly hits the endpoint provided by the user:
+    https://public-api.quickfs.net/v1/data/all-data/{symbol}?api_key={key}
     """
+    base_url = "https://public-api.quickfs.net/v1/data/all-data"
+    url = f"{base_url}/{ticker}"
+    params = {"api_key": API_KEY}
+    
     try:
-        # Initialize Client as per LautaroParada/quickfs documentation
-        client = QuickFS(API_KEY)
+        response = requests.get(url, params=params)
         
-        # 'get_data_full' pulls metadata + all financial statements in one go
-        response = client.get_data_full(symbol=ticker)
-        
-        return response
+        if response.status_code == 404:
+            return None, "Ticker not found. Check format (e.g., use 'IBM:US' not 'US:IBM')."
+        if response.status_code == 403:
+             return None, "API Key Invalid or Quota Exceeded."
+        if response.status_code != 200:
+            return None, f"API Error: {response.status_code}"
+            
+        data = response.json()
+        if "data" not in data:
+            return None, "Invalid data structure received from QuickFS."
+            
+        return data["data"], None
     except Exception as e:
-        return None
+        return None, f"Connection Error: {e}"
 
 # --- INPUT SECTION ---
 with st.container():
     c1, c2 = st.columns([3, 1])
     
     with c1:
+        # UPDATED: Placeholder now shows correct QuickFS format (Ticker:Country)
         ticker_input = st.text_input(
-            "Enter Ticker (Format: EXCHANGE:SYMBOL)", 
-            value="US:MSFT",
-            help="Examples: US:AAPL, LSE:SHELL, TSX:SHOP"
+            "Enter Ticker (Format: SYMBOL:COUNTRY)", 
+            value="IBM:US",
+            help="Examples: APG:US, MSFT:US, SHELL:LSE"
         ).strip().upper()
         
     with c2:
-        timeframe = st.selectbox(
-            "Timeframe",
-            ["5 Years", "10 Years", "20 Years"],
-            index=1
-        )
+        timeframe = st.selectbox("Timeframe", ["5 Years", "10 Years", "20 Years"], index=1)
         limit_map = {"5 Years": 5, "10 Years": 10, "20 Years": 20}
         selected_limit = limit_map[timeframe]
 
@@ -103,94 +113,75 @@ st.divider()
 
 # --- MAIN ANALYSIS ---
 if st.button("🚀 Run Analysis", type="primary"):
-    with st.spinner(f"Fetching data for {ticker_input} using QuickFS SDK..."):
+    with st.spinner(f"Fetching data for {ticker_input} ..."):
         
-        # 1. Fetch Data using SDK
-        data = get_data_from_sdk(ticker_input)
+        # 1. Fetch Data
+        raw_data, error_msg = fetch_quickfs_direct(ticker_input)
         
-        if not data:
-            st.error("Connection Error: Could not retrieve data. Check your API Key and Ticker format.")
-        elif "error" in data:
-             # QuickFS sometimes returns {'error': '...'}
-             st.error(f"API Error: {data['error']}")
+        if error_msg:
+            st.error(error_msg)
         else:
             try:
-                # 2. Extract Data
-                # The SDK returns the raw JSON structure from QuickFS
-                metadata = data.get("metadata", {})
-                financials = data.get("financials", {})
+                # 2. Extract Annual Financials
+                meta = raw_data.get("metadata", {})
+                company_name = meta.get("name", ticker_input)
+                currency = meta.get("currency", "USD")
+                
+                financials = raw_data.get("financials", {})
                 annual = financials.get("annual", {})
                 
-                company_name = metadata.get("name", ticker_input)
-                currency = metadata.get("currency", "USD")
-
-                # 3. Create DataFrame
-                # QuickFS arrays are typically [Oldest .... Newest]
-                # We extract the specific metrics for the Compounder Formula
+                # 3. Check Keys
+                required_keys = ["cfo", "capex", "assets", "liabilities_current"]
+                missing = [k for k in required_keys if k not in annual]
                 
-                # Check if data exists
-                if not annual:
-                    st.error("No annual data found for this ticker.")
+                if missing:
+                    st.error(f"Missing data fields: {missing}")
                 else:
-                    # Metrics mapping (QuickFS keys)
-                    # cfo = Operating Cash Flow
-                    # capex = Capital Expenditures
-                    # assets = Total Assets
-                    # liabilities_current = Total Current Liabilities
+                    # 4. Create DataFrame
+                    # QuickFS arrays are Oldest -> Newest
+                    cfo = annual["cfo"]
+                    capex = annual["capex"]
+                    assets = annual["assets"]
+                    liab = annual["liabilities_current"]
                     
-                    cfo = annual.get("cfo", [])
-                    capex = annual.get("capex", [])
-                    assets = annual.get("assets", [])
-                    liab = annual.get("liabilities_current", [])
-                    
-                    # Handle Dates (fiscal_year is usually provided)
-                    years = annual.get("fiscal_year", [])
-                    
-                    # Ensure all arrays align to the shortest length
-                    min_len = min(len(cfo), len(capex), len(assets), len(liab), len(years))
+                    # Align lengths
+                    min_len = min(len(cfo), len(capex), len(assets), len(liab))
                     
                     if min_len < 2:
-                        st.warning("Not enough historical data to calculate compounder score (Need 2+ years).")
+                        st.warning("Insufficient historical data (Need 2+ years).")
                     else:
-                        # Slice to valid length
+                        # Slice to shortest length
                         df = pd.DataFrame({
-                            "Year": years[-min_len:],
                             "OCF": cfo[-min_len:],
                             "CapEx": capex[-min_len:],
                             "Assets": assets[-min_len:],
                             "Liabilities": liab[-min_len:]
                         })
                         
-                        df.set_index("Year", inplace=True)
-                        
-                        # 4. Calculate Variables
+                        # Generate Years (if provided, else numeric)
+                        if "fiscal_year" in annual:
+                            df.index = annual["fiscal_year"][-min_len:]
+                        else:
+                            df.index = range(1, min_len + 1)
+
+                        # 5. Formulas
                         # FCF = OCF - |CapEx|
                         df['FCF'] = df['OCF'] - df['CapEx'].abs()
-                        
-                        # Invested Capital (Operating Approach)
                         df['IC'] = df['Assets'] - df['Liabilities']
                         
-                        # 5. Filter by Timeframe
+                        # 6. Timeframe Slice
                         if len(df) > selected_limit:
                             df_slice = df.tail(selected_limit)
                         else:
                             df_slice = df
                             
-                        # 6. Final Formulas
-                        start_year = df_slice.index[0]
-                        end_year = df_slice.index[-1]
+                        # 7. Final Calculations
+                        start_idx, end_idx = df_slice.index[0], df_slice.index[-1]
                         
-                        A1 = df_slice['FCF'].sum() # Accumulated FCF
+                        A1 = df_slice['FCF'].sum()
+                        B1 = df_slice.loc[end_idx, 'FCF'] - df_slice.loc[start_idx, 'FCF']
+                        A2 = df_slice.loc[end_idx, 'IC'] - df_slice.loc[start_idx, 'IC']
                         
-                        FCF_start = df_slice.loc[start_year, 'FCF']
-                        FCF_end = df_slice.loc[end_year, 'FCF']
-                        B1 = FCF_end - FCF_start # Growth in FCF
-                        
-                        IC_start = df_slice.loc[start_year, 'IC']
-                        IC_end = df_slice.loc[end_year, 'IC']
-                        A2 = IC_end - IC_start # Growth in IC
-                        
-                        # Ratios
                         roiic = B1 / A2 if A2 != 0 else 0
                         reinvest = A2 / A1 if A1 != 0 else 0
                         score = roiic * reinvest
@@ -207,9 +198,8 @@ if st.button("🚀 Run Analysis", type="primary"):
 
                         # --- RENDER RESULTS ---
                         st.markdown(f"<h3>{company_name} ({currency})</h3>", unsafe_allow_html=True)
-                        st.caption(f"Analysis Period: {start_year} - {end_year}")
+                        st.caption(f"Analysis Period: {start_idx} - {end_idx}")
 
-                        # Metrics
                         m1, m2, m3 = st.columns(3)
                         m1.metric("Compounder Score", f"{score:.1%}", "Target: >20%")
                         m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
@@ -233,13 +223,44 @@ if st.button("🚀 Run Analysis", type="primary"):
                         """
                         st.markdown(table_html, unsafe_allow_html=True)
 
-                        # Verdict Banner
+                        # Verdict
                         st.markdown(f"""
                         <div style="background-color:{v_bg}; padding:15px; border-radius:8px; margin-top:15px; border:1px solid {v_bg}; display:flex; align-items:center; gap:10px;">
                             <span style="font-size:1.2rem;">🧬</span>
                             <span style="color:{v_col}; font-weight:600;">Corporate Phase: {v_txt}</span>
                         </div>
                         """, unsafe_allow_html=True)
+                        
+                        # --- GEMINI AI INTEGRATION ---
+                        st.write("")
+                        st.subheader("🤖 AI Analyst")
+                        
+                        if has_gemini:
+                            if st.button("Generate AI Assessment"):
+                                with st.spinner("Gemini is analyzing the financials..."):
+                                    prompt = f"""
+                                    Act as a senior financial analyst. Analyze the following "Compounder Score" data for {company_name}.
+                                    
+                                    DATA:
+                                    - Period: {start_idx} to {end_idx}
+                                    - ROIIC: {roiic:.1%}
+                                    - Reinvestment Rate: {reinvest:.1%}
+                                    - Final Compounder Score: {score:.1%}
+                                    - Total FCF Generated: {format_currency(A1)}
+                                    - FCF Growth: {format_currency(B1)}
+                                    
+                                    DEFINITIONS:
+                                    - ROIIC > 15% is good.
+                                    - Reinvestment Rate > 80% is aggressive. < 20% is a cash cow.
+                                    
+                                    TASK:
+                                    Write a concise assessment. Is this a high-quality compounder? Comment on efficiency and allocation.
+                                    """
+                                    model = genai.GenerativeModel("gemini-1.5-flash")
+                                    response = model.generate_content(prompt)
+                                    st.markdown(response.text)
+                        else:
+                            st.info("To enable AI analysis, add `GOOGLE_API_KEY` to your secrets.")
 
                         # Data Expander
                         st.write("")
