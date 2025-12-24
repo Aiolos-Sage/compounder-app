@@ -1,6 +1,6 @@
 streamlit
-requests
 pandas
-numpy
+requests
 google-generativeai
-streamlit.components.v1
+quickfs
+numpy
