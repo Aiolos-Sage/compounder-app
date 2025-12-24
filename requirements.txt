@@ -3,3 +3,4 @@ requests
 pandas
 numpy
 google-generativeai
+streamlit.components.v1
