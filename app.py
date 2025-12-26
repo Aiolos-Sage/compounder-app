@@ -28,6 +28,7 @@ with st.sidebar:
 
 # --- DEFINE COLOR PALETTES (Material 3) ---
 if st.session_state.theme == 'dark':
+    # Google Dark Mode Tokens
     colors = {
         "bg": "#121212",
         "surface": "#1E1E1E",
@@ -37,16 +38,17 @@ if st.session_state.theme == 'dark':
         "primary": "#8AB4F8", 
         "border": "#444746",
         "shadow": "0 4px 8px rgba(0,0,0,0.5)",
-        "success_bg": "rgba(129, 201, 149, 0.12)",
+        "success_bg": "rgba(129, 201, 149, 0.15)", # Green tint
         "success_text": "#81C995",
-        "warning_bg": "rgba(253, 214, 99, 0.12)",
+        "warning_bg": "rgba(253, 214, 99, 0.15)",
         "warning_text": "#FDD663",
-        "error_bg": "rgba(242, 139, 130, 0.12)",
+        "error_bg": "rgba(242, 139, 130, 0.15)",
         "error_text": "#F28B82",
-        "blue_bg": "rgba(138, 180, 248, 0.12)",
+        "blue_bg": "rgba(138, 180, 248, 0.15)",
         "blue_text": "#8AB4F8"
     }
 else:
+    # Google Light Mode Tokens
     colors = {
         "bg": "#FFFFFF",
         "surface": "#FFFFFF",
@@ -55,7 +57,7 @@ else:
         "on_surface_variant": "#5F6368",
         "primary": "#1A73E8",
         "border": "#E0E0E0",
-        "shadow": "0 1px 2px rgba(0,0,0,0.06)",
+        "shadow": "0 1px 3px rgba(0,0,0,0.08)",
         "success_bg": "#E6F4EA",
         "success_text": "#137333",
         "warning_bg": "#FEF7E0",
@@ -215,7 +217,7 @@ def process_financials(raw_data):
     except Exception as e:
         return None, str(e)
 
-# --- CUSTOM CARD RENDERER ---
+# --- CUSTOM HTML CARD RENDERER ---
 def render_custom_card(title, value, target, description):
     return f"""
     <div style="
@@ -226,12 +228,13 @@ def render_custom_card(title, value, target, description):
         height: 100%;
         display: flex;
         flex-direction: column;
+        justify-content: space-between;
         box-shadow: {colors['shadow']};
     ">
-        <div style="margin-bottom: auto;">
+        <div>
             <div style="
                 text-transform: uppercase;
-                font-size: 0.75rem;
+                font-size: 0.8rem;
                 font-weight: 700;
                 color: {colors['on_surface_variant']};
                 margin-bottom: 8px;
@@ -272,7 +275,7 @@ def render_custom_card(title, value, target, description):
     </div>
     """
 
-# --- INFOGRAPHIC HTML ---
+# --- INFOGRAPHIC HTML (Expressive v9 Content) ---
 html_guide = """
 <!doctype html>
 <html lang="en">
@@ -281,7 +284,6 @@ html_guide = """
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      /* --- Material 3 Expressive-inspired tokens --- */
       --primary:#1a73e8; --on-primary:#ffffff; --primary-container:#e8f0fe;
       --secondary:#34a853; --secondary-container:rgba(52,168,83,.14);
       --tertiary:#fbbc04; --tertiary-container:rgba(251,188,4,.18);
@@ -551,12 +553,12 @@ if st.session_state.data_loaded:
 
         st.subheader(f"{meta.get('name', ticker)} Analysis ({start_idx} - {end_idx})")
         
-        # --- METRICS SECTION (CUSTOM HTML CARDS) ---
+        # --- NEW METRICS SECTION (REPLACES STANDARD METRICS) ---
         m1, m2, m3 = st.columns(3)
         
         with m1:
             st.markdown(render_custom_card(
-                "COMPOUNDER SCORE",
+                "Compounder Score",
                 f"{score:.1%}",
                 ">20%",
                 "High ROIIC (moat) plus high reinvestment rate (runway) identify the best long-term compounders."
@@ -564,7 +566,7 @@ if st.session_state.data_loaded:
             
         with m2:
             st.markdown(render_custom_card(
-                "RETURN ON INCREMENTAL INVESTED CAPITAL (ROIIC)",
+                "Return on Incremental Invested Capital (ROIIC)",
                 f"{roiic:.1%}",
                 ">15%",
                 "Shows how efficiently the business allocates capital and how strong the moat is."
@@ -572,7 +574,7 @@ if st.session_state.data_loaded:
             
         with m3:
             st.markdown(render_custom_card(
-                "REINVESTMENT RATE",
+                "Reinvestment Rate",
                 f"{reinvest:.1%}",
                 ">80%",
                 "Shows how much reinvestment opportunity the business has and how long its growth runway might be."
