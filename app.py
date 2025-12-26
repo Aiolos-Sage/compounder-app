@@ -15,7 +15,6 @@ except ImportError:
 st.set_page_config(page_title="Compounder Formula (Pro)", page_icon="📊", layout="wide")
 
 # --- THEME MANAGEMENT ---
-# Initialize session state for theme if not present
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
@@ -25,7 +24,6 @@ def toggle_theme():
 # Sidebar Toggle
 with st.sidebar:
     st.header("Settings")
-    # Using a toggle switch for Material Design feel
     is_dark = st.toggle("Dark Mode", value=(st.session_state.theme == 'dark'), on_change=toggle_theme)
 
 # --- DEFINE COLOR PALETTES (Material 3) ---
@@ -37,14 +35,14 @@ if st.session_state.theme == 'dark':
         "surface_high": "#2C2C2C",
         "on_surface": "#E3E3E3",
         "on_surface_variant": "#C4C7C5",
-        "primary": "#8AB4F8", # Light Blue 300 for dark mode
+        "primary": "#8AB4F8", 
         "border": "#444746",
         "shadow": "0 4px 8px rgba(0,0,0,0.5)",
-        "success_bg": "rgba(129, 201, 149, 0.12)", # Green 300
+        "success_bg": "rgba(129, 201, 149, 0.12)",
         "success_text": "#81C995",
-        "warning_bg": "rgba(253, 214, 99, 0.12)", # Yellow 300
+        "warning_bg": "rgba(253, 214, 99, 0.12)",
         "warning_text": "#FDD663",
-        "error_bg": "rgba(242, 139, 130, 0.12)", # Red 300
+        "error_bg": "rgba(242, 139, 130, 0.12)",
         "error_text": "#F28B82",
         "blue_bg": "rgba(138, 180, 248, 0.12)",
         "blue_text": "#8AB4F8"
@@ -57,7 +55,7 @@ else:
         "surface_high": "#F8F9FA",
         "on_surface": "#1F1F1F",
         "on_surface_variant": "#5F6368",
-        "primary": "#1A73E8", # Google Blue 600
+        "primary": "#1A73E8",
         "border": "#E0E0E0",
         "shadow": "0 1px 2px rgba(0,0,0,0.06)",
         "success_bg": "#E6F4EA",
@@ -148,7 +146,7 @@ st.markdown(f"""
     /* Headers */
     h1, h2, h3 {{ color: {colors['on_surface']} !important; }}
     
-    /* Verdict Banner Styles (Dynamic Classes) */
+    /* Verdict Banner Styles */
     .verdict-box {{
         padding: 12px;
         border-radius: 8px;
@@ -240,60 +238,61 @@ def process_financials(raw_data):
     except Exception as e:
         return None, str(e)
 
-# --- DYNAMIC INFOGRAPHIC HTML ---
-# We inject the current theme colors into the HTML string
-html_guide = f"""
+# --- STATIC HTML GUIDE (Original White Background Version) ---
+html_guide = """
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Compounder Formula</title>
   <style>
-    :root{{
-      --primary: {colors['primary']};
-      --surface: {colors['surface']};
-      --surface-low: {colors['surface_high']};
-      --on-surface: {colors['on_surface']};
-      --on-surface-var: {colors['on_surface_variant']};
-      --border: {colors['border']};
-      --shadow: {colors['shadow']};
+    :root{
+      --primary:#1a73e8; 
+      --surface:#ffffff; 
+      --on-surface:#1f1f1f;
+      --r-xl: 28px; 
+      --r-lg: 22px; 
+      --shadow-1: 0 1px 2px rgba(0,0,0,.06);
       font-family: Roboto, sans-serif;
-    }}
-    body{{ 
+    }
+    body{ 
         margin:0; 
-        background: {colors['bg']}; 
-        color: var(--on-surface); 
-    }}
-    .page{{ max-width: 1140px; margin: 0 auto; padding: 1rem; }}
-    .card{{
-      border-radius: 20px; 
-      border: 1px solid var(--border);
-      background: var(--surface); 
-      box-shadow: var(--shadow);
-      padding: 1.5rem; margin-bottom: 1rem;
-    }}
-    h1{{ margin:0; font-size: 2rem; color: var(--primary); }}
-    h2{{ margin-top:0; font-size: 1.3rem; color: var(--on-surface); }}
-    p {{ color: var(--on-surface-var); }}
-    strong {{ color: var(--on-surface); }}
-    .formula{{
+        background: #ffffff; /* FORCE WHITE BACKGROUND */
+        color: #1f1f1f;      /* FORCE DARK TEXT */
+    }
+    .page{ 
+        max-width: 1140px; 
+        margin: 0 auto; 
+        padding: 1.25rem 1.1rem 3rem; 
+    }
+    .card{
+      border-radius: var(--r-xl); 
+      border: 1px solid rgba(31,31,31,.14);
+      background: #f8f9fa; 
+      box-shadow: var(--shadow-1);
+      padding: 1.5rem; 
+      margin-bottom: 1rem;
+    }
+    h1{ margin:0; font-size: 2rem; color: #1a73e8; }
+    h2{ margin-top:0; font-size: 1.3rem; }
+    .formula{
       font-family: monospace; 
-      background: var(--surface-low); 
-      color: var(--on-surface);
-      padding: 8px 12px;
+      background: #ffffff; 
+      padding: 10px;
       border-radius: 8px; 
       display: inline-block; 
       margin: 5px 0;
-      border: 1px solid var(--border);
-    }}
-    .grid{{ display:grid; gap: 1rem; }}
+      border: 1px solid #e0e0e0;
+    }
+    .grid{ display:grid; gap: 1rem; }
   </style>
 </head>
 <body>
   <div class="page">
-    <section class="card" style="text-align:center;">
+    <section class="card" style="background:#ffffff; border:none; box-shadow:none; padding-left:0;">
       <h1>The Compounder Formula Guide</h1>
-      <p>A framework to identify businesses that grow cash and reinvest it at high returns.</p>
+      <p style="color:#5f6368;">A framework to identify businesses that grow cash and reinvest it at high returns.</p>
     </section>
     
     <div class="grid">
@@ -306,10 +305,10 @@ html_guide = f"""
       <section class="card">
         <h2>2. Core Ratios</h2>
         <p><strong>ROIIC (Efficiency):</strong> Measures the return on <em>new</em> capital invested.</p>
-        <p>Target: <strong style="color:{colors['primary']}">>15-20%</strong> indicates a strong moat.</p>
+        <p>Target: <strong style="color:#1a73e8;">>15-20%</strong> indicates a strong moat.</p>
         <br>
         <p><strong>Reinvestment Rate (Opportunity):</strong> Measures how much FCF is plowed back into growth.</p>
-        <p>Target: <strong style="color:{colors['primary']}">>80%</strong> indicates an aggressive compounder.</p>
+        <p>Target: <strong style="color:#1a73e8;">>80%</strong> indicates an aggressive compounder.</p>
       </section>
 
       <section class="card">
@@ -462,6 +461,7 @@ if st.session_state.data_loaded:
             st.dataframe(df_display.style.format("{:,.0f}"))
         
         with st.expander("The Compounder Formula Guide"):
+            # Render the static white-themed HTML in a safe iframe
             components.html(html_guide, height=800, scrolling=True)
             
     else:
