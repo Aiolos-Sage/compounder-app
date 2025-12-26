@@ -566,10 +566,10 @@ if st.session_state.data_loaded:
             
         with m2:
             st.markdown(render_custom_card(
-                "Return on Incremental Invested Capital (ROIIC)",
+                "Return on Incremental Invested Capital",
                 f"{roiic:.1%}",
                 ">15%",
-                "Shows how efficiently the business allocates capital and how strong the moat is."
+                "ROIIC shows how efficiently the business allocates capital and how strong the moat is."
             ), unsafe_allow_html=True)
             
         with m3:
