@@ -577,7 +577,7 @@ if st.session_state.data_loaded:
                 "Reinvestment Rate",
                 f"{reinvest:.1%}",
                 ">80%",
-                "Shows how much reinvestment opportunity the business has and how long its growth runway can be."
+                "How much reinvestment opportunity the business has and how long its growth runway can be."
             ), unsafe_allow_html=True)
         
         # HTML Table with Dynamic Colors
