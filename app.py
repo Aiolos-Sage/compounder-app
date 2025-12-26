@@ -14,25 +14,150 @@ except ImportError:
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Compounder Formula (Pro)", page_icon="📊", layout="wide")
 
-# --- CUSTOM CSS ---
-st.markdown("""
+# --- THEME MANAGEMENT ---
+# Initialize session state for theme if not present
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'
+
+def toggle_theme():
+    st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
+
+# Sidebar Toggle
+with st.sidebar:
+    st.header("Settings")
+    # Using a toggle switch for Material Design feel
+    is_dark = st.toggle("Dark Mode", value=(st.session_state.theme == 'dark'), on_change=toggle_theme)
+
+# --- DEFINE COLOR PALETTES (Material 3) ---
+if st.session_state.theme == 'dark':
+    # Google Dark Mode Tokens
+    colors = {
+        "bg": "#121212",
+        "surface": "#1E1E1E",
+        "surface_high": "#2C2C2C",
+        "on_surface": "#E3E3E3",
+        "on_surface_variant": "#C4C7C5",
+        "primary": "#8AB4F8", # Light Blue 300 for dark mode
+        "border": "#444746",
+        "shadow": "0 4px 8px rgba(0,0,0,0.5)",
+        "success_bg": "rgba(129, 201, 149, 0.12)", # Green 300
+        "success_text": "#81C995",
+        "warning_bg": "rgba(253, 214, 99, 0.12)", # Yellow 300
+        "warning_text": "#FDD663",
+        "error_bg": "rgba(242, 139, 130, 0.12)", # Red 300
+        "error_text": "#F28B82",
+        "blue_bg": "rgba(138, 180, 248, 0.12)",
+        "blue_text": "#8AB4F8"
+    }
+else:
+    # Google Light Mode Tokens
+    colors = {
+        "bg": "#FFFFFF",
+        "surface": "#FFFFFF",
+        "surface_high": "#F8F9FA",
+        "on_surface": "#1F1F1F",
+        "on_surface_variant": "#5F6368",
+        "primary": "#1A73E8", # Google Blue 600
+        "border": "#E0E0E0",
+        "shadow": "0 1px 2px rgba(0,0,0,0.06)",
+        "success_bg": "#E6F4EA",
+        "success_text": "#137333",
+        "warning_bg": "#FEF7E0",
+        "warning_text": "#B06000",
+        "error_bg": "#FCE8E6",
+        "error_text": "#C5221F",
+        "blue_bg": "#E8F0FE",
+        "blue_text": "#1967d2"
+    }
+
+# --- INJECT DYNAMIC CSS ---
+st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Roboto', sans-serif; }
-    .block-container { max-width: 1200px; padding-top: 2rem; }
     
-    /* Metrics */
-    div[data-testid="stMetric"] {
-        background-color: #ffffff; padding: 15px; border-radius: 10px;
-        border: 1px solid #e0e0e0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    div[data-testid="stMetricValue"] { color: #1a73e8; font-weight: 700; font-size: 1.6rem; }
+    html, body, [class*="css"] {{
+        font-family: 'Roboto', sans-serif;
+        background-color: {colors['bg']};
+        color: {colors['on_surface']};
+    }}
+    
+    /* Main Container */
+    .block-container {{ 
+        max-width: 1200px; 
+        padding-top: 2rem; 
+    }}
+    
+    /* Streamlit Metric Cards */
+    div[data-testid="stMetric"] {{
+        background-color: {colors['surface']};
+        padding: 15px;
+        border-radius: 12px;
+        border: 1px solid {colors['border']};
+        box-shadow: {colors['shadow']};
+    }}
+    div[data-testid="stMetricValue"] {{
+        color: {colors['primary']} !important;
+        font-weight: 700;
+        font-size: 1.6rem;
+    }}
+    label[data-testid="stMetricLabel"] {{
+        color: {colors['on_surface_variant']};
+    }}
     
     /* Tables */
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-    th { text-align: left; color: #5f6368; background-color: #f8f9fa; padding: 10px; }
-    td { padding: 10px; border-bottom: 1px solid #eee; color: #202124; }
-    tr:last-child td { font-weight: bold; background-color: #f8f9fa; }
+    table {{
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+        background-color: {colors['surface']};
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid {colors['border']};
+    }}
+    th {{
+        text-align: left;
+        color: {colors['on_surface_variant']};
+        background-color: {colors['surface_high']};
+        padding: 12px;
+        font-weight: 600;
+        border-bottom: 1px solid {colors['border']};
+    }}
+    td {{
+        padding: 12px;
+        border-bottom: 1px solid {colors['border']};
+        color: {colors['on_surface']};
+    }}
+    tr:last-child td {{
+        font-weight: bold;
+        background-color: {colors['surface_high']};
+        border-bottom: none;
+    }}
+    
+    /* Inputs */
+    input[type="text"] {{
+        background-color: {colors['surface']} !important;
+        color: {colors['on_surface']} !important;
+        border: 1px solid {colors['border']} !important;
+    }}
+    div[data-baseweb="select"] > div {{
+        background-color: {colors['surface']} !important;
+        color: {colors['on_surface']} !important;
+        border-color: {colors['border']} !important;
+    }}
+    
+    /* Headers */
+    h1, h2, h3 {{ color: {colors['on_surface']} !important; }}
+    
+    /* Verdict Banner Styles (Dynamic Classes) */
+    .verdict-box {{
+        padding: 12px;
+        border-radius: 8px;
+        margin-top: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid transparent;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,16 +180,12 @@ def format_currency(val):
     return f"${val:,.0f}"
 
 def smart_get(data_dict, keys_to_try):
-    """Finds the first matching key in a dictionary."""
     for k in keys_to_try:
         if k in data_dict: return data_dict[k]
     return None
 
 @st.cache_data(show_spinner=False)
 def fetch_quickfs_data(ticker):
-    """
-    Fetches FULL data from QuickFS. Cached to allow changing years without re-fetching.
-    """
     url = f"https://public-api.quickfs.net/v1/data/all-data/{ticker}"
     params = {"api_key": API_KEY}
     try:
@@ -77,27 +198,18 @@ def fetch_quickfs_data(ticker):
         return None, str(e)
 
 def process_financials(raw_data):
-    """
-    Extracts Annual and Quarterly data, aligns them, and builds the TTM row.
-    """
     try:
         annual = raw_data.get("financials", {}).get("annual", {})
         quarterly = raw_data.get("financials", {}).get("quarterly", {})
         
-        # --- 1. PROCESS ANNUAL ---
-        # Identify Keys
         cfo_a = smart_get(annual, ["cf_cfo", "cfo", "cash_flow_operating"])
         capex_a = smart_get(annual, ["capex", "capital_expenditures"])
         assets_a = smart_get(annual, ["total_assets", "assets"])
         liab_a = smart_get(annual, ["total_current_liabilities", "liabilities_current"])
-        
-        # Dates
         dates_a = annual.get("period_end_date", annual.get("fiscal_year", []))
         
-        if not cfo_a or not dates_a:
-            return None, "Required annual metrics missing."
+        if not cfo_a or not dates_a: return None, "Required annual metrics missing."
 
-        # Align lengths
         min_len = min(len(cfo_a), len(dates_a))
         df_annual = pd.DataFrame({
             "OCF": cfo_a[-min_len:],
@@ -105,10 +217,8 @@ def process_financials(raw_data):
             "Assets": assets_a[-min_len:] if assets_a else [0]*min_len,
             "Liabilities": liab_a[-min_len:] if liab_a else [0]*min_len
         })
-        # Extract Year (e.g. "2023" from "2023-12")
         df_annual.index = [str(d).split('-')[0] for d in dates_a[-min_len:]]
         
-        # --- 2. PROCESS TTM (If Quarterly Exists) ---
         df_ttm = None
         cfo_q = smart_get(quarterly, ["cf_cfo", "cfo", "cash_flow_operating"])
         capex_q = smart_get(quarterly, ["capex", "capital_expenditures"])
@@ -116,7 +226,6 @@ def process_financials(raw_data):
         liab_q = smart_get(quarterly, ["total_current_liabilities", "liabilities_current"])
         
         if cfo_q and len(cfo_q) >= 4:
-            # TTM Logic: Sum last 4 quarters for Flow, take Last quarter for Stock
             ttm_ocf = sum(cfo_q[-4:])
             ttm_capex = sum(capex_q[-4:]) if capex_q else 0
             ttm_assets = assets_q[-1] if assets_q else 0
@@ -128,43 +237,61 @@ def process_financials(raw_data):
             }, index=["TTM"])
 
         return df_annual, df_ttm
-
     except Exception as e:
         return None, str(e)
 
-# --- INFOGRAPHIC HTML CONTENT ---
-html_guide = """
+# --- DYNAMIC INFOGRAPHIC HTML ---
+# We inject the current theme colors into the HTML string
+html_guide = f"""
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>The Compounder Formula</title>
   <style>
-    :root{
-      --primary:#1a73e8; --surface:#ffffff; --on-surface:#1f1f1f;
-      --r-xl: 28px; --r-lg: 22px; --shadow-1: 0 1px 2px rgba(0,0,0,.06);
+    :root{{
+      --primary: {colors['primary']};
+      --surface: {colors['surface']};
+      --surface-low: {colors['surface_high']};
+      --on-surface: {colors['on_surface']};
+      --on-surface-var: {colors['on_surface_variant']};
+      --border: {colors['border']};
+      --shadow: {colors['shadow']};
       font-family: Roboto, sans-serif;
-    }
-    body{ margin:0; background: linear-gradient(180deg, #ffffff 0%, #f7f8fb 100%); color: var(--on-surface); }
-    .page{ max-width: 1140px; margin: 0 auto; padding: 1.25rem 1.1rem 3rem; }
-    .card{
-      border-radius: var(--r-xl); border: 1px solid rgba(31,31,31,.14);
-      background: rgba(255,255,255,.9); box-shadow: var(--shadow-1);
+    }}
+    body{{ 
+        margin:0; 
+        background: {colors['bg']}; 
+        color: var(--on-surface); 
+    }}
+    .page{{ max-width: 1140px; margin: 0 auto; padding: 1rem; }}
+    .card{{
+      border-radius: 20px; 
+      border: 1px solid var(--border);
+      background: var(--surface); 
+      box-shadow: var(--shadow);
       padding: 1.5rem; margin-bottom: 1rem;
-    }
-    h1{ margin:0; font-size: 2rem; color: #1a73e8; }
-    h2{ margin-top:0; font-size: 1.3rem; }
-    .formula{
-      font-family: monospace; background: #f1f3f4; padding: 10px;
-      border-radius: 8px; display: inline-block; margin: 5px 0;
-    }
-    .grid{ display:grid; gap: 1rem; }
+    }}
+    h1{{ margin:0; font-size: 2rem; color: var(--primary); }}
+    h2{{ margin-top:0; font-size: 1.3rem; color: var(--on-surface); }}
+    p {{ color: var(--on-surface-var); }}
+    strong {{ color: var(--on-surface); }}
+    .formula{{
+      font-family: monospace; 
+      background: var(--surface-low); 
+      color: var(--on-surface);
+      padding: 8px 12px;
+      border-radius: 8px; 
+      display: inline-block; 
+      margin: 5px 0;
+      border: 1px solid var(--border);
+    }}
+    .grid{{ display:grid; gap: 1rem; }}
   </style>
 </head>
 <body>
   <div class="page">
-    <section class="card">
+    <section class="card" style="text-align:center;">
       <h1>The Compounder Formula Guide</h1>
       <p>A framework to identify businesses that grow cash and reinvest it at high returns.</p>
     </section>
@@ -179,10 +306,10 @@ html_guide = """
       <section class="card">
         <h2>2. Core Ratios</h2>
         <p><strong>ROIIC (Efficiency):</strong> Measures the return on <em>new</em> capital invested.</p>
-        <p>Target: <strong>>15-20%</strong> indicates a strong moat.</p>
+        <p>Target: <strong style="color:{colors['primary']}">>15-20%</strong> indicates a strong moat.</p>
         <br>
         <p><strong>Reinvestment Rate (Opportunity):</strong> Measures how much FCF is plowed back into growth.</p>
-        <p>Target: <strong>>80%</strong> indicates an aggressive compounder.</p>
+        <p>Target: <strong style="color:{colors['primary']}">>80%</strong> indicates an aggressive compounder.</p>
       </section>
 
       <section class="card">
@@ -198,14 +325,12 @@ html_guide = """
 
 # --- APP LOGIC ---
 
-# 1. Ticker Input
 col_input, col_btn = st.columns([3, 1])
 with col_input:
     ticker = st.text_input("Ticker", "APG:US", label_visibility="collapsed", placeholder="Enter Ticker (e.g. APG:US)").strip().upper()
 with col_btn:
     load_btn = st.button("Load Financials", type="primary", use_container_width=True)
 
-# 2. State Management
 if "data_loaded" not in st.session_state:
     st.session_state.data_loaded = False
     st.session_state.raw_df = None
@@ -228,7 +353,6 @@ if load_btn and ticker:
             else:
                 st.error(df_ttm)
 
-# 3. Main Dashboard
 if st.session_state.data_loaded:
     df_main = st.session_state.raw_df
     df_ttm = st.session_state.ttm_df
@@ -236,7 +360,7 @@ if st.session_state.data_loaded:
     
     st.divider()
     
-    # --- TIMEFRAME SELECTOR ---
+    # TIMEFRAME SELECTOR
     available_years = list(df_main.index)
     available_options = available_years.copy()
     if df_ttm is not None:
@@ -253,17 +377,15 @@ if st.session_state.data_loaded:
         end_idx = len(valid_end_options)-1 
         end_period = st.selectbox("End Year", valid_end_options, index=end_idx)
     
-    # --- FILTERING ---
-    # We use .copy() to avoid SettingWithCopyWarning
+    # FILTERING
     if end_period == "TTM" and df_ttm is not None:
         df_combined = pd.concat([df_main, df_ttm])
         df_slice = df_combined.loc[start_period:].copy() 
     else:
         df_slice = df_main.loc[start_period : end_period].copy()
 
-    # --- CALCULATIONS ---
+    # CALCULATIONS
     if len(df_slice) >= 2:
-        # These operations are now safe because df_slice is a copy
         df_slice['FCF'] = df_slice['OCF'] - df_slice['CapEx'].abs()
         df_slice['IC'] = df_slice['Assets'] - df_slice['Liabilities']
         
@@ -278,13 +400,16 @@ if st.session_state.data_loaded:
         reinvest = A2 / A1 if A1 != 0 else 0
         score = roiic * reinvest
         
-        # Verdict
-        if reinvest < 0.20: v_txt, v_bg, v_col = "Cash Cow", "#fef7e0", "#b06000"
-        elif 0.80 <= reinvest <= 1.00: v_txt, v_bg, v_col = "Aggressive Compounder", "#e6f4ea", "#137333"
-        elif reinvest > 1.00: v_txt, v_bg, v_col = "External Funding (>100%)", "#fce8e6", "#c5221f"
-        else: v_txt, v_bg, v_col = "Moderate Reinvestment", "#e8f0fe", "#1967d2"
+        # Verdict Styling
+        if reinvest < 0.20: 
+            v_txt, v_bg, v_col = "Cash Cow", colors['warning_bg'], colors['warning_text']
+        elif 0.80 <= reinvest <= 1.00: 
+            v_txt, v_bg, v_col = "Aggressive Compounder", colors['success_bg'], colors['success_text']
+        elif reinvest > 1.00: 
+            v_txt, v_bg, v_col = "External Funding (>100%)", colors['error_bg'], colors['error_text']
+        else: 
+            v_txt, v_bg, v_col = "Moderate Reinvestment", colors['blue_bg'], colors['blue_text']
 
-        # --- DISPLAY ---
         st.subheader(f"{meta.get('name', ticker)} Analysis ({start_idx} - {end_idx})")
         
         m1, m2, m3 = st.columns(3)
@@ -292,7 +417,7 @@ if st.session_state.data_loaded:
         m2.metric("ROIIC", f"{roiic:.1%}", "Target: >15%")
         m3.metric("Reinvestment Rate", f"{reinvest:.1%}", "Target: >80%")
         
-        # HTML Table
+        # HTML Table with Dynamic Colors
         table_html = f"""
         <table>
             <thead><tr><th>Metric</th><th>Value</th><th>Formula</th><th>Label</th></tr></thead>
@@ -302,28 +427,25 @@ if st.session_state.data_loaded:
                 <tr><td><b>Increase in IC</b></td><td>{format_currency(A2)}</td><td>IC<sub>end</sub> - IC<sub>start</sub></td><td><b>A2</b></td></tr>
                 <tr><td><b>ROIIC</b></td><td>{roiic:.1%}</td><td>B1 / A2</td><td><b>C1</b></td></tr>
                 <tr><td><b>Reinvestment Rate</b></td><td>{reinvest:.1%}</td><td>A2 / A1</td><td><b>C2</b></td></tr>
-                <tr style="background-color:#f8f9fa"><td><b>Final Score</b></td><td>{score:.1%}</td><td>C1 × C2</td><td><b>Result</b></td></tr>
+                <tr style="background-color:{colors['surface_high']}"><td><b>Final Score</b></td><td>{score:.1%}</td><td>C1 × C2</td><td><b>Result</b></td></tr>
             </tbody>
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
         
-        # Verdict Banner
         st.markdown(f"""
-        <div style="background-color:{v_bg}; padding:12px; border-radius:8px; margin-top:15px; border:1px solid {v_bg}; display:flex; align-items:center; gap:10px;">
+        <div class="verdict-box" style="background-color:{v_bg}; border-color:{v_bg};">
             <span style="font-size:1.2rem;">🧬</span>
-            <span style="color:{v_col}; font-weight:600;">Phase: {v_txt}</span>
+            <span style="color:{v_col}; font-weight:700;">Phase: {v_txt}</span>
         </div>
         """, unsafe_allow_html=True)
         
         st.write("")
         st.write("")
         
-        # --- VIEW DATA MODULE ---
         with st.expander("View Data"):
-            
-            st.markdown("""
-            <small style="color: #5f6368;">
+            st.markdown(f"""
+            <small style="color: {colors['on_surface_variant']};">
             <b>QuickFS Data Mapping:</b><br>
             • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
             • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
@@ -332,16 +454,13 @@ if st.session_state.data_loaded:
             <br><br>
             """, unsafe_allow_html=True)
             
-            # Create a display-friendly version of the dataframe
             df_display = df_slice.rename(columns={
                 "OCF": "Operating Cash Flow",
                 "Assets": "Total Assets",
                 "Liabilities": "Total Current Liabilities"
             })
-            
             st.dataframe(df_display.style.format("{:,.0f}"))
         
-        # --- NEW COMPOUNDER GUIDE EXPANDER ---
         with st.expander("The Compounder Formula Guide"):
             components.html(html_guide, height=800, scrolling=True)
             
