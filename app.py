@@ -179,38 +179,65 @@ def process_financials(raw_data):
         annual = raw_data.get("financials", {}).get("annual", {})
         quarterly = raw_data.get("financials", {}).get("quarterly", {})
         
+        # --- ANNUAL KEYS ---
         cfo_a = smart_get(annual, ["cf_cfo", "cfo", "cash_flow_operating"])
         capex_a = smart_get(annual, ["capex", "capital_expenditures"])
-        assets_a = smart_get(annual, ["total_assets", "assets"])
         liab_a = smart_get(annual, ["total_current_liabilities", "liabilities_current"])
+        
+        # MODIFIED ASSETS: PPE Net + Goodwill
+        ppe_a = smart_get(annual, ["ppe_net", "net_property_plant_and_equipment"])
+        goodwill_a = smart_get(annual, ["goodwill"])
+        
         dates_a = annual.get("period_end_date", annual.get("fiscal_year", []))
         
         if not cfo_a or not dates_a: return None, "Required annual metrics missing."
 
         min_len = min(len(cfo_a), len(dates_a))
+        
+        # Create Lists aligned to min_len
+        # We fill None with 0 to allow addition
+        def slice_and_fill(arr, length):
+            if not arr: return [0] * length
+            s = arr[-length:]
+            return [x if x is not None else 0 for x in s]
+
+        ppe_sliced = slice_and_fill(ppe_a, min_len)
+        gw_sliced = slice_and_fill(goodwill_a, min_len)
+        
+        # Calculate Modified Assets (PPE + Goodwill)
+        mod_assets = [p + g for p, g in zip(ppe_sliced, gw_sliced)]
+
         df_annual = pd.DataFrame({
             "OCF": cfo_a[-min_len:],
-            "CapEx": capex_a[-min_len:] if capex_a else [0]*min_len,
-            "Assets": assets_a[-min_len:] if assets_a else [0]*min_len,
-            "Liabilities": liab_a[-min_len:] if liab_a else [0]*min_len
+            "CapEx": slice_and_fill(capex_a, min_len),
+            "Assets": mod_assets, # STORED AS 'ASSETS' for compatibility with rest of script
+            "Liabilities": slice_and_fill(liab_a, min_len)
         })
         df_annual.index = [str(d).split('-')[0] for d in dates_a[-min_len:]]
         
+        # --- QUARTERLY / TTM KEYS ---
         df_ttm = None
         cfo_q = smart_get(quarterly, ["cf_cfo", "cfo", "cash_flow_operating"])
         capex_q = smart_get(quarterly, ["capex", "capital_expenditures"])
-        assets_q = smart_get(quarterly, ["total_assets", "assets"])
         liab_q = smart_get(quarterly, ["total_current_liabilities", "liabilities_current"])
+        
+        # Modified Assets TTM
+        ppe_q = smart_get(quarterly, ["ppe_net", "net_property_plant_and_equipment"])
+        goodwill_q = smart_get(quarterly, ["goodwill"])
         
         if cfo_q and len(cfo_q) >= 4:
             ttm_ocf = sum(cfo_q[-4:])
             ttm_capex = sum(capex_q[-4:]) if capex_q else 0
-            ttm_assets = assets_q[-1] if assets_q else 0
             ttm_liab = liab_q[-1] if liab_q else 0
+            
+            # TTM Assets (Most Recent Quarter Stock)
+            last_ppe = ppe_q[-1] if ppe_q and ppe_q[-1] is not None else 0
+            last_gw = goodwill_q[-1] if goodwill_q and goodwill_q[-1] is not None else 0
+            ttm_mod_assets = last_ppe + last_gw
             
             df_ttm = pd.DataFrame({
                 "OCF": [ttm_ocf], "CapEx": [ttm_capex], 
-                "Assets": [ttm_assets], "Liabilities": [ttm_liab]
+                "Assets": [ttm_mod_assets], "Liabilities": [ttm_liab]
             }, index=["TTM"])
 
         return df_annual, df_ttm
