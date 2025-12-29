@@ -71,7 +71,7 @@ else:
 # --- INJECT DYNAMIC CSS ---
 st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@250;400;500;700&display=swap');
     
     html, body, [class*="css"] {{
         font-family: 'Roboto', sans-serif;
