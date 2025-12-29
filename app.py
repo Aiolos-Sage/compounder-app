@@ -194,8 +194,7 @@ def process_financials(raw_data):
 
         min_len = min(len(cfo_a), len(dates_a))
         
-        # Create Lists aligned to min_len
-        # We fill None with 0 to allow addition
+        # Helper to align array lengths
         def slice_and_fill(arr, length):
             if not arr: return [0] * length
             s = arr[-length:]
@@ -210,8 +209,10 @@ def process_financials(raw_data):
         df_annual = pd.DataFrame({
             "OCF": cfo_a[-min_len:],
             "CapEx": slice_and_fill(capex_a, min_len),
-            "Assets": mod_assets, # STORED AS 'ASSETS' for compatibility with rest of script
-            "Liabilities": slice_and_fill(liab_a, min_len)
+            "Assets": mod_assets, # Used for Formula Calculation
+            "Liabilities": slice_and_fill(liab_a, min_len),
+            "PPE": ppe_sliced,    # Stored for Display
+            "Goodwill": gw_sliced # Stored for Display
         })
         df_annual.index = [str(d).split('-')[0] for d in dates_a[-min_len:]]
         
@@ -221,7 +222,6 @@ def process_financials(raw_data):
         capex_q = smart_get(quarterly, ["capex", "capital_expenditures"])
         liab_q = smart_get(quarterly, ["total_current_liabilities", "liabilities_current"])
         
-        # Modified Assets TTM
         ppe_q = smart_get(quarterly, ["ppe_net", "net_property_plant_and_equipment"])
         goodwill_q = smart_get(quarterly, ["goodwill"])
         
@@ -230,14 +230,18 @@ def process_financials(raw_data):
             ttm_capex = sum(capex_q[-4:]) if capex_q else 0
             ttm_liab = liab_q[-1] if liab_q else 0
             
-            # TTM Assets (Most Recent Quarter Stock)
+            # TTM Assets components (Most Recent Quarter Stock)
             last_ppe = ppe_q[-1] if ppe_q and ppe_q[-1] is not None else 0
             last_gw = goodwill_q[-1] if goodwill_q and goodwill_q[-1] is not None else 0
             ttm_mod_assets = last_ppe + last_gw
             
             df_ttm = pd.DataFrame({
-                "OCF": [ttm_ocf], "CapEx": [ttm_capex], 
-                "Assets": [ttm_mod_assets], "Liabilities": [ttm_liab]
+                "OCF": [ttm_ocf], 
+                "CapEx": [ttm_capex], 
+                "Assets": [ttm_mod_assets], 
+                "Liabilities": [ttm_liab],
+                "PPE": [last_ppe],
+                "Goodwill": [last_gw]
             }, index=["TTM"])
 
         return df_annual, df_ttm
@@ -302,309 +306,100 @@ def render_custom_card(title, value, target, description):
     </div>
     """
 
-# --- INFOGRAPHIC HTML (EXACT CONTENT RESTORED) ---
+# --- INFOGRAPHIC HTML ---
 html_guide = """
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>The Compounder Formula — Material 3 Expressive Infographic</title>
   <style>
     :root{
-      /* --- Material 3 Expressive-inspired tokens (static palette) --- */
-      --primary:#1a73e8;
-      --on-primary:#ffffff;
-      --primary-container:#e8f0fe;
-
-      --secondary:#34a853;
-      --secondary-container:rgba(52,168,83,.14);
-
-      --tertiary:#fbbc04;
-      --tertiary-container:rgba(251,188,4,.18);
-
-      --error:#ea4335;
-      --outline:rgba(31,31,31,.14);
-
-      --surface:#ffffff;
-      --surface-1:#fbfbfb;
-      --surface-container-low:#f5f7fb;
-      --surface-container:#f1f3f4;
+      /* --- Material 3 Expressive-inspired tokens --- */
+      --primary:#1a73e8; --on-primary:#ffffff; --primary-container:#e8f0fe;
+      --secondary:#34a853; --secondary-container:rgba(52,168,83,.14);
+      --tertiary:#fbbc04; --tertiary-container:rgba(251,188,4,.18);
+      --error:#ea4335; --outline:rgba(31,31,31,.14);
+      --surface:#ffffff; --surface-1:#fbfbfb;
+      --surface-container-low:#f5f7fb; --surface-container:#f1f3f4;
       --surface-container-high:#e9eef6;
-
-      --on-surface:#1f1f1f;
-      --on-surface-variant:#5f6368;
-
+      --on-surface:#1f1f1f; --on-surface-variant:#5f6368;
       --shadow-1: 0 1px 2px rgba(0,0,0,.06), 0 2px 10px rgba(0,0,0,.06);
       --shadow-2: 0 6px 18px rgba(0,0,0,.10), 0 2px 6px rgba(0,0,0,.08);
-
-      --r-xl: 28px;
-      --r-lg: 22px;
-      --r-md: 18px;
-      --r-sm: 14px;
-
-      font-size: 16px; /* 1rem baseline */
+      --r-xl: 28px; --r-lg: 22px; --r-md: 18px; --r-sm: 14px;
+      font-size: 16px;
     }
-
     *{ box-sizing:border-box; }
-
     body{
       margin:0;
-      background:
-        radial-gradient(1200px 900px at 15% 10%, rgba(26,115,232,.12), transparent 55%),
-        radial-gradient(900px 700px at 85% 20%, rgba(52,168,83,.10), transparent 55%),
-        radial-gradient(850px 650px at 70% 85%, rgba(251,188,4,.12), transparent 55%),
-        linear-gradient(180deg, #ffffff 0%, #f7f8fb 100%);
+      background: #ffffff; /* FORCE WHITE BACKGROUND */
       color: var(--on-surface);
-      font-family: Roboto, "Google Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif;
-      font-size: 1rem; /* minimum */
-      line-height: 1.45;
+      font-family: Roboto, "Google Sans", sans-serif;
+      font-size: 1rem; line-height: 1.45;
     }
-
-    .page{
-      max-width: 1140px;
-      margin: 0 auto;
-      padding: 1.25rem 1.1rem 3rem;
-    }
-
-    /* --- Expressive hero (color + shape + containment) --- */
+    .page{ max-width: 1140px; margin: 0 auto; padding: 1.25rem 1.1rem 3rem; }
+    
     .hero{
-      position: relative;
-      overflow: hidden;
-      border-radius: var(--r-xl);
+      position: relative; overflow: hidden; border-radius: var(--r-xl);
       border: 1px solid var(--outline);
       background: linear-gradient(135deg, rgba(26,115,232,.10), rgba(52,168,83,.08) 48%, rgba(251,188,4,.10));
-      box-shadow: var(--shadow-2);
-      padding: 1.35rem 1.35rem 1.2rem;
+      box-shadow: var(--shadow-2); padding: 1.35rem 1.35rem 1.2rem;
     }
-    .hero .top{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-    .title{
-      display:flex;
-      gap: 1rem;
-      align-items:flex-start;
-      min-width: 0;
-    }
+    .title{ display:flex; gap: 1rem; align-items:flex-start; min-width: 0; }
     .mark{
-      width: 54px; height: 54px;
-      border-radius: 18px;
-      background: var(--surface);
-      border: 1px solid rgba(26,115,232,.18);
-      box-shadow: var(--shadow-1);
-      display:grid;
-      place-items:center;
-      flex: 0 0 auto;
+      width: 54px; height: 54px; border-radius: 18px; background: var(--surface);
+      border: 1px solid rgba(26,115,232,.18); box-shadow: var(--shadow-1);
+      display:grid; place-items:center; flex: 0 0 auto;
     }
-    .mark svg{ display:block; }
-    h1{
-      margin:0;
-      font-size: 2.25rem;
-      font-weight: 800;
-      letter-spacing: .2px;
-    }
-    .subtitle{
-      margin:.35rem 0 0;
-      font-size: 1.05rem;
-      color: rgba(31,31,31,.74);
-      max-width: 70ch;
-    }
-    .grid{
-      display:grid;
-      gap: 1rem;
-      margin-top: 1rem;
-    }
-
-    /* --- Cards (containment) --- */
+    h1{ margin:0; font-size: 2.25rem; font-weight: 800; letter-spacing: .2px; }
+    .subtitle{ margin:.35rem 0 0; font-size: 1.05rem; color: rgba(31,31,31,.74); }
+    .grid{ display:grid; gap: 1rem; margin-top: 1rem; }
     .card{
-      border-radius: var(--r-xl);
-      border: 1px solid var(--outline);
-      background: rgba(255,255,255,.86);
-      box-shadow: var(--shadow-1);
-      padding: 1.15rem 1.15rem 1.05rem;
-      position: relative;
-      overflow:hidden;
-      transition: transform .18s ease, box-shadow .18s ease;
+      border-radius: var(--r-xl); border: 1px solid var(--outline);
+      background: rgba(255,255,255,.86); box-shadow: var(--shadow-1);
+      padding: 1.15rem 1.15rem 1.05rem; position: relative; overflow:hidden;
     }
     .card:before{
-      content:"";
-      position:absolute;
-      inset:-2px auto auto -2px;
-      width: 10px;
-      height: 100%;
+      content:""; position:absolute; inset:-2px auto auto -2px; width: 10px; height: 100%;
       background: linear-gradient(180deg, rgba(26,115,232,.95), rgba(52,168,83,.75), rgba(251,188,4,.75));
-      border-top-left-radius: var(--r-xl);
-      border-bottom-left-radius: var(--r-xl);
-      opacity: .85;
+      border-top-left-radius: var(--r-xl); border-bottom-left-radius: var(--r-xl); opacity: .85;
     }
-    .card-header{
-      display:flex;
-      gap: .85rem;
-      align-items:flex-start;
-      margin-bottom: .8rem;
-    }
+    .card-header{ display:flex; gap: .85rem; align-items:flex-start; margin-bottom: .8rem; }
     .step{
-      width: 40px; height: 40px;
-      border-radius: 14px;
-      background: var(--primary-container);
-      border: 1px solid rgba(26,115,232,.18);
-      display:grid;
-      place-items:center;
-      font-weight: 900;
-      color: #174ea6;
-      font-size: 1rem;
-      flex: 0 0 auto;
+      width: 40px; height: 40px; border-radius: 14px; background: var(--primary-container);
+      border: 1px solid rgba(26,115,232,.18); display:grid; place-items:center;
+      font-weight: 900; color: #174ea6; font-size: 1rem; flex: 0 0 auto;
     }
-    h2{
-      margin: .1rem 0 0;
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: .2px;
-    }
-    ul{
-      margin: .2rem 0 0 1.1rem;
-      padding:0;
-      font-size: 1rem;
-      color: var(--on-surface);
-    }
+    h2{ margin: .1rem 0 0; font-size: 1.35rem; font-weight: 800; letter-spacing: .2px; }
+    ul{ margin: .2rem 0 0 1.1rem; padding:0; font-size: 1rem; color: var(--on-surface); }
     li{ margin:.35rem 0; }
-    .muted{
-      margin:.2rem 0 0;
-      color: var(--on-surface-variant);
-      font-size: 1rem;
-    }
-
-    /* --- Definition tiles (shape + size) --- */
-    .two-col{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    @media (max-width: 920px){
-      .two-col{ grid-template-columns: 1fr; }
-    }
+    .muted{ margin:.2rem 0 0; color: var(--on-surface-variant); font-size: 1rem; }
+    .two-col{ display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
     .tile{
-      border-radius: var(--r-lg);
-      border: 1px solid rgba(31,31,31,.10);
-      background: var(--surface-container);
-      padding: 1rem;
-      position: relative;
-      overflow:hidden;
+      border-radius: var(--r-lg); border: 1px solid rgba(31,31,31,.10);
+      background: var(--surface-container); padding: 1rem; position: relative; overflow:hidden;
     }
-    .tile:after{
-      content:"";
-      position:absolute;
-      right:-70px; top:-70px;
-      width: 170px; height: 170px;
-      border-radius: 60px;
-      background: rgba(26,115,232,.10);
-      transform: rotate(16deg);
-    }
-    .tile:nth-child(2):after{
-      background: rgba(52,168,83,.10);
-    }
-    .tile h3{
-      margin:0 0 .5rem;
-      font-size: 1.15rem;
-      font-weight: 800;
-      position: relative;
-      z-index: 1;
-    }
+    .tile h3{ margin:0 0 .5rem; font-size: 1.15rem; font-weight: 800; position: relative; z-index: 1; }
     .formula{
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 1rem;
-      padding: .65rem .75rem;
-      border-radius: var(--r-md);
-      border: 1px solid rgba(31,31,31,.14);
-      background: rgba(255,255,255,.9);
-      position: relative;
-      z-index: 1;
-      overflow-x:auto;
-      white-space: nowrap;
+      font-family: ui-monospace, monospace; font-size: 1rem; padding: .65rem .75rem;
+      border-radius: var(--r-md); border: 1px solid rgba(31,31,31,.14);
+      background: rgba(255,255,255,.9); position: relative; z-index: 1;
+      overflow-x:auto; white-space: nowrap;
     }
-
-    /* --- Media blocks (SVG containers) --- */
-    .media{
-      margin-top: .8rem;
-      border-radius: var(--r-lg);
-      border: 1px solid rgba(31,31,31,.14);
-      background: var(--surface);
-      padding: .9rem;
-      overflow:hidden;
-    }
-
-    /* --- Ratio panel --- */
-    .ratio-grid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      align-items: stretch;
-    }
-    @media (max-width: 980px){
-      .ratio-grid{ grid-template-columns: 1fr; }
-    }
+    .ratio-grid, .score-grid{ display:grid; gap: 1rem; align-items: stretch; }
+    .ratio-grid { grid-template-columns: 1fr 1fr; }
+    .score-grid { grid-template-columns: 1.1fr .9fr; }
+    @media (max-width: 980px){ .ratio-grid, .score-grid, .two-col{ grid-template-columns: 1fr; } }
     .panel{
-      border-radius: var(--r-lg);
-      border: 1px solid rgba(31,31,31,.12);
-      background: var(--surface-container-low);
-      padding: 1rem;
-      position: relative;
-      overflow:hidden;
+      border-radius: var(--r-lg); border: 1px solid rgba(31,31,31,.12);
+      background: var(--surface-container-low); padding: 1rem; position: relative; overflow:hidden;
     }
-    .panel .kicker{
-      display:flex;
-      align-items:center;
-      gap:.6rem;
-      margin-bottom:.6rem;
-    }
-    .icon{
-      width: 20px; height: 20px;
-      display:grid;
-      place-items:center;
-      border-radius: 8px;
-      background: rgba(26,115,232,.10);
-      border: 1px solid rgba(26,115,232,.18);
-      flex: 0 0 auto;
-    }
-    .panel h3{
-      margin:0;
-      font-size: 1.15rem;
-      font-weight: 900;
-      letter-spacing:.15px;
-    }
-    .panel p{
-      margin: .5rem 0 0;
-      font-size: 1rem;
-      color: rgba(31,31,31,.82);
-    }
-    .strong{
-      color: #174ea6;
-      font-weight: 900;
-    }
-
-    /* --- Score area --- */
-    .score-grid{
-      display:grid;
-      grid-template-columns: 1.1fr .9fr;
-      gap: 1rem;
-      align-items: stretch;
-    }
-    @media (max-width: 980px){
-      .score-grid{ grid-template-columns: 1fr; }
-    }
-
+    .panel h3{ margin:0; font-size: 1.15rem; font-weight: 900; }
+    .panel p{ margin: .5rem 0 0; font-size: 1rem; color: rgba(31,31,31,.82); }
     .footer{
-      border-radius: var(--r-xl);
-      border: 1px solid var(--outline);
-      background: rgba(255,255,255,.86);
-      box-shadow: var(--shadow-1);
-      padding: 1rem 1.15rem;
-      color: rgba(31,31,31,.72);
-      font-size: 1rem;
+      border-radius: var(--r-xl); border: 1px solid var(--outline);
+      background: rgba(255,255,255,.86); box-shadow: var(--shadow-1);
+      padding: 1rem 1.15rem; color: rgba(31,31,31,.72); font-size: 1rem;
     }
     
     .meter{
@@ -1087,17 +882,27 @@ if st.session_state.data_loaded:
             <b>QuickFS Data Mapping:</b><br>
             • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
             • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
-            • Total Assets and Total Current Liabilities are part of the <b>Balance Sheet</b>.
+            • Assets are the sum of <b>Property, Plant, & Equipment (Net)</b> (ppe_net) plus <b>Goodwill</b>. They are part of the Balance Sheet.<br>
+            • Total Current Liabilities are part of the <b>Balance Sheet</b>.
             </small>
             <br><br>
             """, unsafe_allow_html=True)
             
-            df_display = df_slice.rename(columns={
+            # Prepare display DF (remove 'Assets' sum column, add individual components)
+            df_display = df_slice.copy()
+            df_display = df_display.rename(columns={
                 "OCF": "Operating Cash Flow",
-                "Assets": "Total Assets",
-                "Liabilities": "Total Current Liabilities"
+                "Liabilities": "Total Current Liabilities",
+                "PPE": "PPE (net)"
             })
-            st.dataframe(df_display.style.format("{:,.0f}"))
+            
+            # Select and reorder columns for clarity
+            # We explicitly exclude the 'Assets' sum column from the display
+            cols_to_show = ["Operating Cash Flow", "CapEx", "PPE (net)", "Goodwill", "Total Current Liabilities", "FCF", "IC"]
+            # Ensure columns exist (FCF/IC added in main logic)
+            cols = [c for c in cols_to_show if c in df_display.columns]
+            
+            st.dataframe(df_display[cols].style.format("{:,.0f}"))
         
         with st.expander("The Compounder Formula Guide"):
             components.html(html_guide, height=2000, scrolling=True)
