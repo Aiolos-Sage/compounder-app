@@ -510,7 +510,7 @@ html_guide = """
 
           <div class="tile">
             <h3>Invested Capital (IC)</h3>
-            <div class="formula">IC = PPE (net) + Goodwill − Total Current Liabilities</div>
+            <div class="formula">IC = PPE_net + Goodwill − Total Current Liabilities</div>
             <p class="muted"><strong>Meaning:</strong> Capital truly tied up in operations.</p>
           </div>
         </div>
