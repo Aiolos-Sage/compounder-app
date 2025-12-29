@@ -71,7 +71,7 @@ else:
 # --- INJECT DYNAMIC CSS ---
 st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@250;400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
     
     html, body, [class*="css"] {{
         font-family: 'Roboto', sans-serif;
@@ -381,7 +381,7 @@ html_guide = """
     }
     .tile h3{ margin:0 0 .5rem; font-size: 1.15rem; font-weight: 800; position: relative; z-index: 1; }
     .formula{
-      font-family: ui-monospace, monospace; font-size: 1rem; padding: .65rem .75rem;
+      font-family: ui-monospace, monospace; font-size: .75rem; padding: .65rem .75rem;
       border-radius: var(--r-md); border: 1px solid rgba(31,31,31,.14);
       background: rgba(255,255,255,.9); position: relative; z-index: 1;
       overflow-x:auto; white-space: nowrap;
