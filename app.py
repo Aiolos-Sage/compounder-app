@@ -884,9 +884,8 @@ if st.session_state.data_loaded:
             st.markdown(f"""
             <small style="color: {colors['on_surface_variant']};">
             <b>QuickFS Data Mapping:</b><br>
-            • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
-            • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
-            • Assets are the sum of <b>Property, Plant, & Equipment (Net)</b> (ppe_net) plus <b>Goodwill</b>. They are part of the Balance Sheet.<br>
+            • Operating Cash Flow is named <b>Cash From Operations</b> in the Cash Flow Statement of QuickFS.<br>
+            • CapEx is located at <b>Cash Flow Statement >> Property, Plant, & Equipment<b> on QuickFS.<br>
             • Total Current Assets and Total Current Liabilities are part of the <b>Balance Sheet</b>.
             </small>
             <br><br>
