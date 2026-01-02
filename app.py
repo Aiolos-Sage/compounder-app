@@ -184,7 +184,8 @@ def process_financials(raw_data):
         capex_a = smart_get(annual, ["capex", "capital_expenditures"])
         liab_a = smart_get(annual, ["total_current_liabilities", "liabilities_current"])
         
-        # MODIFIED ASSETS: PPE Net + Goodwill
+        # ASSETS COMPONENTS
+        ca_a = smart_get(annual, ["total_current_assets", "current_assets"])
         ppe_a = smart_get(annual, ["ppe_net", "net_property_plant_and_equipment"])
         goodwill_a = smart_get(annual, ["goodwill"])
         
@@ -202,17 +203,16 @@ def process_financials(raw_data):
 
         ppe_sliced = slice_and_fill(ppe_a, min_len)
         gw_sliced = slice_and_fill(goodwill_a, min_len)
-        
-        # Calculate Modified Assets (PPE + Goodwill)
-        mod_assets = [p + g for p, g in zip(ppe_sliced, gw_sliced)]
+        ca_sliced = slice_and_fill(ca_a, min_len)
+        liab_sliced = slice_and_fill(liab_a, min_len)
 
         df_annual = pd.DataFrame({
             "OCF": cfo_a[-min_len:],
             "CapEx": slice_and_fill(capex_a, min_len),
-            "Assets": mod_assets, # Used for Formula Calculation
-            "Liabilities": slice_and_fill(liab_a, min_len),
-            "PPE": ppe_sliced,    # Stored for Display
-            "Goodwill": gw_sliced # Stored for Display
+            "Liabilities": liab_sliced,
+            "PPE": ppe_sliced,
+            "Goodwill": gw_sliced,
+            "Current Assets": ca_sliced
         })
         df_annual.index = [str(d).split('-')[0] for d in dates_a[-min_len:]]
         
@@ -220,28 +220,31 @@ def process_financials(raw_data):
         df_ttm = None
         cfo_q = smart_get(quarterly, ["cf_cfo", "cfo", "cash_flow_operating"])
         capex_q = smart_get(quarterly, ["capex", "capital_expenditures"])
-        liab_q = smart_get(quarterly, ["total_current_liabilities", "liabilities_current"])
         
+        # Balance Sheet Items (Stock)
+        liab_q = smart_get(quarterly, ["total_current_liabilities", "liabilities_current"])
+        ca_q = smart_get(quarterly, ["total_current_assets", "current_assets"])
         ppe_q = smart_get(quarterly, ["ppe_net", "net_property_plant_and_equipment"])
         goodwill_q = smart_get(quarterly, ["goodwill"])
         
         if cfo_q and len(cfo_q) >= 4:
+            # Flow items (sum 4 quarters)
             ttm_ocf = sum(cfo_q[-4:])
             ttm_capex = sum(capex_q[-4:]) if capex_q else 0
-            ttm_liab = liab_q[-1] if liab_q else 0
             
-            # TTM Assets components (Most Recent Quarter Stock)
-            last_ppe = ppe_q[-1] if ppe_q and ppe_q[-1] is not None else 0
-            last_gw = goodwill_q[-1] if goodwill_q and goodwill_q[-1] is not None else 0
-            ttm_mod_assets = last_ppe + last_gw
+            # Stock items (most recent quarter)
+            ttm_liab = liab_q[-1] if liab_q else 0
+            ttm_ca = ca_q[-1] if ca_q else 0
+            ttm_ppe = ppe_q[-1] if ppe_q and ppe_q[-1] is not None else 0
+            ttm_gw = goodwill_q[-1] if goodwill_q and goodwill_q[-1] is not None else 0
             
             df_ttm = pd.DataFrame({
                 "OCF": [ttm_ocf], 
                 "CapEx": [ttm_capex], 
-                "Assets": [ttm_mod_assets], 
                 "Liabilities": [ttm_liab],
-                "PPE": [last_ppe],
-                "Goodwill": [last_gw]
+                "Current Assets": [ttm_ca],
+                "PPE": [ttm_ppe],
+                "Goodwill": [ttm_gw]
             }, index=["TTM"])
 
         return df_annual, df_ttm
@@ -510,8 +513,8 @@ html_guide = """
 
           <div class="tile">
             <h3>Invested Capital (IC)</h3>
-            <div class="formula">IC = PPE_net + Goodwill − Total Current Liabilities</div>
-            <p class="muted"><strong>Meaning:</strong> Capital truly tied up in operations.</p>
+            <div class="formula">IC = (Total Current Assets - Total Current Liabilities) + PPE_net + Goodwill</div>
+            <p class="muted"><strong>Meaning:</strong> Working Capital plus Tangible and Acquired Assets.</p>
           </div>
         </div>
       </section>
@@ -798,7 +801,8 @@ if st.session_state.data_loaded:
     # CALCULATIONS
     if len(df_slice) >= 2:
         df_slice['FCF'] = df_slice['OCF'] - df_slice['CapEx'].abs()
-        df_slice['IC'] = df_slice['Assets'] - df_slice['Liabilities']
+        # New Invested Capital Definition: (Current Assets - Liabilities) + PPE + Goodwill
+        df_slice['IC'] = (df_slice['Current Assets'] - df_slice['Liabilities']) + df_slice['PPE'] + df_slice['Goodwill']
         
         start_idx = df_slice.index[0]
         end_idx = df_slice.index[-1]
@@ -883,7 +887,7 @@ if st.session_state.data_loaded:
             • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
             • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
             • Assets are the sum of <b>Property, Plant, & Equipment (Net)</b> (ppe_net) plus <b>Goodwill</b>. They are part of the Balance Sheet.<br>
-            • Total Current Liabilities are part of the <b>Balance Sheet</b>.
+            • Total Current Assets and Total Current Liabilities are part of the <b>Balance Sheet</b>.
             </small>
             <br><br>
             """, unsafe_allow_html=True)
@@ -893,12 +897,12 @@ if st.session_state.data_loaded:
             df_display = df_display.rename(columns={
                 "OCF": "Operating Cash Flow",
                 "Liabilities": "Total Current Liabilities",
-                "PPE": "PPE (net)"
+                "PPE": "PPE (net)",
+                "Current Assets": "Total Current Assets"
             })
             
             # Select and reorder columns for clarity
-            # We explicitly exclude the 'Assets' sum column from the display
-            cols_to_show = ["Operating Cash Flow", "CapEx", "PPE (net)", "Goodwill", "Total Current Liabilities", "FCF", "IC"]
+            cols_to_show = ["Operating Cash Flow", "CapEx", "Total Current Assets", "Total Current Liabilities", "PPE (net)", "Goodwill", "FCF", "IC"]
             # Ensure columns exist (FCF/IC added in main logic)
             cols = [c for c in cols_to_show if c in df_display.columns]
             
