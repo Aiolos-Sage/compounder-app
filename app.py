@@ -377,7 +377,10 @@ html_guide = """
     ul{ margin: .2rem 0 0 1.1rem; padding:0; font-size: 1rem; color: var(--on-surface); }
     li{ margin:.35rem 0; }
     .muted{ margin:.2rem 0 0; color: var(--on-surface-variant); font-size: 1rem; }
-    .two-col{ display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    
+    /* --- STACKED DEFINITION TILES --- */
+    .two-col{ display:grid; grid-template-columns: 1fr; gap: 1rem; } /* STACKED VERTICALLY */
+    
     .tile{
       border-radius: var(--r-lg); border: 1px solid rgba(31,31,31,.10);
       background: var(--surface-container); padding: 1rem; position: relative; overflow:hidden;
@@ -801,7 +804,7 @@ if st.session_state.data_loaded:
     # CALCULATIONS
     if len(df_slice) >= 2:
         df_slice['FCF'] = df_slice['OCF'] - df_slice['CapEx'].abs()
-        # New Invested Capital Definition: (Current Assets - Liabilities) + PPE + Goodwill
+        # Invested Capital Definition: (Current Assets - Liabilities) + PPE + Goodwill
         df_slice['IC'] = (df_slice['Current Assets'] - df_slice['Liabilities']) + df_slice['PPE'] + df_slice['Goodwill']
         
         start_idx = df_slice.index[0]
@@ -884,8 +887,9 @@ if st.session_state.data_loaded:
             st.markdown(f"""
             <small style="color: {colors['on_surface_variant']};">
             <b>QuickFS Data Mapping:</b><br>
-            • Operating Cash Flow is named <b>Cash From Operations</b> in the Cash Flow Statement of QuickFS.<br>
-            • CapEx is located at <b>Cash Flow Statement >> Property, Plant, & Equipment<b> on QuickFS.<br>
+            • Operating Cash Flow is named <b>Cash From Operations</b> on QuickFS Cash Flow Statement.<br>
+            • CapEx is found under <b>Property, Plant, & Equipment</b> on QuickFS Cash Flow Statement.<br>
+            • Assets are the sum of <b>Property, Plant, & Equipment (Net)</b> (ppe_net) plus <b>Goodwill</b>. They are part of the Balance Sheet.<br>
             • Total Current Assets and Total Current Liabilities are part of the <b>Balance Sheet</b>.
             </small>
             <br><br>
